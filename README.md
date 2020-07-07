@@ -26,6 +26,7 @@ manifest file will be located at sample.manifest.tsv
 
 ## TODO
 
+* ensure md5sum code for AWS works for files < 5G too
 * What additional metadata?  Beyond DRS metadata? -> U. Chicago help neede
 * Checksum strategy 
 * AWS and Google upload support -> currently have AWS via boto
