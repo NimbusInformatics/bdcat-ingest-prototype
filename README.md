@@ -24,4 +24,13 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 manifest file will be located at sample.manifest.tsv
 
+## TODO
+
+* What additional metadata?  Beyond DRS metadata? -> U. Chicago help neede
+* Checksum strategy 
+* AWS and Google upload support -> currently have AWS via boto
+* Setup process with Noble -> bucket creation SOP
+* Handoff process with U. Chicago -> manifest handoff SOP
+* High-performance uploads and parallelization testing
+* Packaging of software to make it easier for Mac/Win users (optional?)
 
