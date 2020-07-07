@@ -5,6 +5,7 @@
 import argparse
 #import subprocess
 #import requests
+import hashlib
 import csv
 import sys
 #import os
@@ -83,12 +84,18 @@ def upload_to_aws(od):
    
 	   # Upload the file
 		try:
+			computed_checksum = calculate_s3_etag(key)
 			aws_client.upload_file(key, bucket, s3_file)
 			response = aws_client.head_object(Bucket=bucket, Key=s3_file)
 			file_size = response['ContentLength']
 			print ("size:", file_size)
 			s3_path = 's3://' + bucket + '/' + s3_file
 			md5sum = response['ETag'][1:-1]
+			print('checksum check:', computed_checksum, ':', md5sum)
+			if (computed_checksum == md5sum):
+				print('same checksum')
+			else:
+				print('different checksum') 
 			value['s3_path'] = s3_path
 			value['file_size'] = file_size
 			value['md5sum'] = md5sum
@@ -98,7 +105,28 @@ def upload_to_aws(od):
 			value['s3_path'] = ''
 			value['file_size'] = -1
 			value['md5sum'] = ''
-			
+
+# code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
+def calculate_s3_etag(file_path, chunk_size=8 * 1024 * 1024):
+    md5s = []
+
+    with open(file_path, 'rb') as fp:
+        while True:
+            data = fp.read(chunk_size)
+            if not data:
+                break
+            md5s.append(hashlib.md5(data))
+
+    if len(md5s) < 1:
+        return '{}'.format(hashlib.md5().hexdigest())
+
+    if len(md5s) == 1:
+        return '{}'.format(md5s[0].hexdigest())
+
+    digests = b''.join(m.digest() for m in md5s)
+    digests_md5 = hashlib.md5(digests)
+    return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
+    			
 def upload_to_gcloud(od):    
 	for key, value in od.items(): 
 		bucket = get_bucket_name(value)
