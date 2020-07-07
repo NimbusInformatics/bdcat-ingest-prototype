@@ -5,6 +5,7 @@
 import argparse
 #import subprocess
 #import requests
+import datetime
 import hashlib
 import csv
 import sys
@@ -13,11 +14,13 @@ from os import access, R_OK
 from os.path import isfile, basename
 from collections import OrderedDict 
 
-# for aws
+# for aws s3
 import logging
 import boto3
 from botocore.exceptions import ClientError
 
+# for google storage
+from google.cloud import storage
 
 def main():
 	parser = argparse.ArgumentParser(description='Process TSV file.')
@@ -78,18 +81,21 @@ def upload_to_aws(od):
     #TODO do we care if file already exists?
 
 	for key, value in od.items(): 
-		bucket = get_bucket_name(value)
+		bucket_name = get_bucket_name(value)
 		s3_file = basename(key)
-		print('attempting to upload ' + s3_file + ' to s3://' + bucket)
+		print('attempting to upload ' + s3_file + ' to s3://' + bucket_name)
    
 	   # Upload the file
 		try:
 			computed_checksum = calculate_s3_etag(key)
-			aws_client.upload_file(key, bucket, s3_file)
-			response = aws_client.head_object(Bucket=bucket, Key=s3_file)
+			start = datetime.datetime.now()
+			aws_client.upload_file(key, bucket_name, s3_file)
+			end = datetime.datetime.now()
+			print('elapsed time', end - start)
+			response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
 			file_size = response['ContentLength']
 			print ("size:", file_size)
-			s3_path = 's3://' + bucket + '/' + s3_file
+			s3_path = 's3://' + bucket_name + '/' + s3_file
 			md5sum = response['ETag'][1:-1]
 			print('checksum check:', computed_checksum, ':', md5sum)
 			if (computed_checksum == md5sum):
@@ -107,6 +113,7 @@ def upload_to_aws(od):
 			value['md5sum'] = ''
 
 # code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
+# more discussion of how checksum is calculated for s3 here: https://stackoverflow.com/questions/6591047/etag-definition-changed-in-amazon-s3/28877788#28877788
 def calculate_s3_etag(file_path, chunk_size=8 * 1024 * 1024):
     md5s = []
 
@@ -126,13 +133,31 @@ def calculate_s3_etag(file_path, chunk_size=8 * 1024 * 1024):
     digests = b''.join(m.digest() for m in md5s)
     digests_md5 = hashlib.md5(digests)
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
-    			
+
+# FIXME work out manifest fields when --aws and --gs both set
+# FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
+# ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
 def upload_to_gcloud(od):    
+	storage_client = storage.Client()
+
 	for key, value in od.items(): 
-		bucket = get_bucket_name(value)
+		bucket_name = get_bucket_name(value)
 		file = basename(key)
-		print('attempting to upload ' + file + ' to gs://' + bucket)   
-		 # FIXME upload file
+		print('attempting to upload ' + file + ' to gs://' + bucket_name)
+		bucket = storage_client.bucket(bucket_name)
+		blob = bucket.blob(file)
+		# Set chunk size to be same as AWS. 
+		# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
+		blob.chunk_size = 8 * 1024 * 1024 # Set 8 MB blob size
+		start = datetime.datetime.now()
+		blob.upload_from_filename(key)
+		end = datetime.datetime.now()
+		print('elapsed time', end - start)
+		gs_path = 'gs://' + bucket_name + '/' + file
+		blob = bucket.get_blob(file)		
+		value['gs_path'] = gs_path
+		value['file_size'] = blob.size
+		value['md5sum'] = blob.md5_hash  
 
 def get_bucket_name(row):
 	return row['study_id'] + '-' + row['consent_code']

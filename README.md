@@ -9,18 +9,22 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     conda activate nimbus--data-ingest
     pip install awscli
     pip install boto3
+    pip install google-cloud-storage
 
 1. Create large file called big_binary.MOV in current directory (should be > 8 MB)
 
-2. Run `aws configure`
+2. Run `aws configure` / set up google cloud credentials
 
-3. For testing, update study\_id fields in sample.tsv. Then create aws s3 buckets with the name `<study_id>-<consent_code>`
+3. For testing, update study\_id fields in sample.tsv. Then create aws/gs s3 buckets with the name `<study_id>-<consent_code>`
 
 ## Running Code
 
 
     conda activate nimbus--data-ingest
     python process.py --aws --tsv sample.tsv 
+    or
+    python process.py --gs --tsv sample.tsv 
+   
 
 manifest file will be located at sample.manifest.tsv
 
