@@ -28,14 +28,9 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 manifest file will be located at sample.manifest.tsv
 
-## TODO
+## Design Doc
 
-* ensure md5sum code for AWS works for files < 5G too
-* What additional metadata?  Beyond DRS metadata? -> U. Chicago help neede
-* Checksum strategy 
-* AWS and Google upload support -> currently have AWS via boto
-* Setup process with Noble -> bucket creation SOP
-* Handoff process with U. Chicago -> manifest handoff SOP
-* High-performance uploads and parallelization testing
-* Packaging of software to make it easier for Mac/Win users (optional?)
+See [20200608 - Data Ingest Brainstorming](https://docs.google.com/document/d/1bZHUKZPL7Q7onKLSdR3YBrM7oeREC54yf1g_Dpc2yVI/edit) for design information.  
+## Issues
 
+See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) for tracking issues.
