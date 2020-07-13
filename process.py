@@ -27,6 +27,8 @@ def main():
 	parser.add_argument('--tsv', required=True, type=argparse.FileType('r'), help='tsv file')
 	parser.add_argument('--gs', default=False, action='store_true', help='upload to Google Cloud')
 	parser.add_argument('--aws', default=False, action='store_true', help='upload to AWS')
+	parser.add_argument('--threads', default=10, help='number of concurrent threads')
+	parser.add_argument('--chunk-size', default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
 
 	# validate args
 	args = parser.parse_args()
@@ -43,12 +45,12 @@ def main():
 	for row in reader:
 		manifest_row = process_row(od, row)
 
-	checksum_files(od)
+	checksum_files(od, args.threads)
 	
 	if (args.gs):
-		upload_to_gcloud(od)
+		upload_to_gcloud(od, args.threads, args.chunk_size)
 	if (args.aws):
-		upload_to_aws(od)
+		upload_to_aws(od, args.threads, args.chunk_size)
 	
 	manifest_filepath = args.tsv.name
 	if (manifest_filepath.endswith('.tsv')):
@@ -63,7 +65,7 @@ def process_row(od, row):
 	assert isfile(local_file) and access(local_file, R_OK), \
        "File {} doesn't exist or isn't readable".format(local_file)
 
-def checksum_files(od):
+def checksum_files(od, num_threads):
 	# FIXME
 	return
 
@@ -72,8 +74,10 @@ def checksum_files(od):
 # and uploading each chunk in parallel.
 # See https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3.html#uploads to
 # change default transfer options
+# Add mulipart upload resume option
+# https://gist.github.com/holyjak/b5613c50f37865f0e3953b93c39bd61a
  
-def upload_to_aws(od): 
+def upload_to_aws(od, threads, chunk_size): 
 	aws_client = boto3.client('s3')
 
     #TODO confirm all files with unique names???
@@ -83,15 +87,20 @@ def upload_to_aws(od):
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value)
 		s3_file = basename(key)
-		print('attempting to upload ' + s3_file + ' to s3://' + bucket_name)
-   
+		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size)
+ 		
+		transfer_config = boto3.s3.transfer.TransferConfig(multipart_chunksize=chunk_size, max_concurrency=threads, use_threads=True)  
 	   # Upload the file
 		try:
-			computed_checksum = calculate_s3_etag(key)
-			start = datetime.datetime.now()
-			aws_client.upload_file(key, bucket_name, s3_file)
+			start = datetime.datetime.now()			
+			computed_checksum = calculate_s3_etag(key, chunk_size)
 			end = datetime.datetime.now()
-			print('elapsed time', end - start)
+			print('elapsed time for checksum:', end - start)
+
+			start = datetime.datetime.now()
+			aws_client.upload_file(key, bucket_name, s3_file, Config=transfer_config)
+			end = datetime.datetime.now()
+			print('elapsed time for aws upload:', end - start)
 			response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
 			file_size = response['ContentLength']
 			print ("size:", file_size)
@@ -114,7 +123,7 @@ def upload_to_aws(od):
 
 # code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
 # more discussion of how checksum is calculated for s3 here: https://stackoverflow.com/questions/6591047/etag-definition-changed-in-amazon-s3/28877788#28877788
-def calculate_s3_etag(file_path, chunk_size=8 * 1024 * 1024):
+def calculate_s3_etag(file_path, chunk_size):
     md5s = []
 
     with open(file_path, 'rb') as fp:
@@ -137,7 +146,7 @@ def calculate_s3_etag(file_path, chunk_size=8 * 1024 * 1024):
 # FIXME work out manifest fields when --aws and --gs both set
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
-def upload_to_gcloud(od):    
+def upload_to_gcloud(od, threads, chunk_size):    
 	storage_client = storage.Client()
 
 	for key, value in od.items(): 
@@ -148,11 +157,11 @@ def upload_to_gcloud(od):
 		blob = bucket.blob(file)
 		# Set chunk size to be same as AWS. 
 		# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
-		blob.chunk_size = 8 * 1024 * 1024 # Set 8 MB blob size
+		blob.chunk_size = chunk_size
 		start = datetime.datetime.now()
 		blob.upload_from_filename(key)
 		end = datetime.datetime.now()
-		print('elapsed time', end - start)
+		print('elapsed time for gs upload:', end - start)
 		gs_path = 'gs://' + bucket_name + '/' + file
 		blob = bucket.get_blob(file)		
 		value['gs_path'] = gs_path
