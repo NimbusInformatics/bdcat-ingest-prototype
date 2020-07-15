@@ -10,7 +10,8 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     pip install awscli
     pip install boto3
     pip install google-cloud-storage
-
+	pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+	
 1. Create large file called big_binary.MOV in current directory (should be > 8 MB)
 
 2. Run `aws configure` / set up google cloud credentials

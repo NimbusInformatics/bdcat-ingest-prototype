@@ -9,7 +9,7 @@ import datetime
 import hashlib
 import csv
 import sys
-#import os
+import os
 from os import access, R_OK
 from os.path import isfile, basename
 from collections import OrderedDict 
@@ -21,6 +21,10 @@ from botocore.exceptions import ClientError
 
 # for google storage
 from google.cloud import storage
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from google.api_core.exceptions import BadRequest, Forbidden
+from google.cloud.exceptions import NotFound
 
 def main():
 	parser = argparse.ArgumentParser(description='Process TSV file.')
@@ -43,13 +47,18 @@ def main():
 	# process file
 	od = OrderedDict()
 	read_and_verify_file(od, args) 
-	checksum_files(od, args.threads)
 	
 	if (args.gs):
+		calculate_gs_checksums(od, args.threads, args.chunk_size)
 		upload_to_gcloud(od, args.threads, args.chunk_size)
+	else:
+		add_blank_gs_manifest_metadata(od)
 	if (args.aws):
+		calculate_aws_checksums(od, args.threads, args.chunk_size)
 		upload_to_aws(od, args.threads, args.chunk_size)
-	
+	else:
+		add_blank_aws_manifest_metadata(od)	
+		
 	manifest_filepath = args.tsv.name
 	if (manifest_filepath.endswith('.tsv')):
 		manifest_filepath = manifest_filepath.replace(".tsv", ".manifest.tsv")	
@@ -75,7 +84,8 @@ def read_and_verify_file(od, args) :
 		exit()
 	if (args.test):
 		print("Test mode:", args.tsv.name, "valid. Script now exiting.")
-		exit()			
+		exit()
+					
 def process_row(od, row, test_mode):
 	local_file = row['file_local_path']
 	od[local_file] = row
@@ -89,8 +99,33 @@ def process_row(od, row, test_mode):
 		return False
        
 def verify_gs_buckets(od, test_mode):
-	return
-	
+	gs_buckets = {}
+	storage_client = storage.Client()
+
+	credentials = service_account.Credentials.from_service_account_file(
+		filename=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
+		scopes=["https://www.googleapis.com/auth/cloud-platform"],
+	)
+	service = build(
+		"cloudresourcemanager", "v1", credentials=credentials
+	)
+
+	permissions = {
+		"permissions": [
+			"resourcemanager.projects.get",
+			"resourcemanager.projects.delete",
+		]
+	}
+
+	all_buckets_writeable = True
+
+	for key, value in od.items(): 
+		bucket_name = get_bucket_name(value) 
+		if (gs_bucket_writeable(bucket_name, storage_client, credentials, service, permissions, gs_buckets, test_mode) == False):
+#		if (gs_bucket_writeable(bucket_name, storage_client, '', '', '', gs_buckets, test_mode) == False):		
+			all_buckets_writeable = False
+	return all_buckets_writeable
+		
 def verify_aws_buckets(od, test_mode):
 	aws_buckets = {}
 	iam = boto3.client('iam')
@@ -104,9 +139,14 @@ def verify_aws_buckets(od, test_mode):
 			all_buckets_writeable = False
 	return all_buckets_writeable
 
-def checksum_files(od, num_threads):
-	# FIXME
-	return
+def calculate_aws_checksums(od, num_threads, chunk_size):
+	for key, value in od.items(): 
+		start = datetime.datetime.now()			
+		computed_checksum = calculate_s3_etag(key, chunk_size)
+		end = datetime.datetime.now()
+		print('elapsed time for checksum:', end - start)
+		value['s3_md5sum'] = computed_checksum	
+
 
 # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-uploading-files.html
 # The upload_file method handles large files by splitting them into smaller chunks
@@ -128,12 +168,6 @@ def upload_to_aws(od, threads, chunk_size):
 		bucket_name = get_bucket_name(value)
 		s3_file = basename(key)
 		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
- 		
-		start = datetime.datetime.now()			
-		computed_checksum = calculate_s3_etag(key, chunk_size)
-		end = datetime.datetime.now()
-		print('elapsed time for checksum:', end - start)
-		value['s3_md5sum'] = computed_checksum
 		
 		if (aws_key_exists(aws_client, bucket_name, key)):
 			print("Already exists. Skipping", key)
@@ -150,9 +184,7 @@ def upload_to_aws(od, threads, chunk_size):
 			except ClientError as e:
 				logging.error(e)
 				print(e)
-				value['s3_path'] = ''
-				value['s3_modified_date'] = ''	 
-				value['file_size'] = -1
+				add_blank_aws_manifest_metadata(value)
 
 def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 	if (bucket_name in aws_buckets):
@@ -167,7 +199,7 @@ def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 		try:
 			s3 = boto3.resource('s3')
 			if (not(s3.Bucket(bucket_name) in s3.buckets.all())):
-				print('ERROR: bucket does not exist -', bucket_name)
+				print('ERROR: s3 bucket does not exist -', bucket_name)
 				return False
 				
 			# Run the policy simulation for the PUT
@@ -184,23 +216,46 @@ def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 				return True
 			else:
 				aws_buckets[bucket_name] = 0
-				print('ERROR: bucket does not exist or is not writeable -', bucket_name)
+				print('ERROR: s3 bucket does not exist or is not writeable -', bucket_name)
 				return False
 		except botocore.errorfactory.NoSuchBucket as e:
 			aws_buckets[bucket_name] = 0
-			print('ERROR: bucket does not exist or is not writeable -', bucket_name)
+			print('ERROR: s3 bucket does not exist or is not writeable -', bucket_name)
 			return False
 		
 
-def gs_bucket_writeable(bucket_name, test_mode):
-	if (aws_buckets[bucket_name] == 1):
-		return true
-	elif (aws_buckets[bucket_name] == 0):
-		return false
+def gs_bucket_writeable(bucket_name, storage_client, credentials, service, permissions, gs_buckets, test_mode):
+	if (bucket_name in gs_buckets):
+		if (gs_buckets[bucket_name] == 1):
+			return True
+		else:
+			return False
 	else:
-		# FIXME
-		return True
-
+		try:
+			bucket = storage_client.get_bucket(bucket_name)
+			if (bucket.exists()):
+				policy = bucket.get_iam_policy()
+				for binding in policy.bindings:
+					print("Role: {}, Members: {}".format(binding["role"], binding["members"]))
+#				request = service.buckets().testIamPermissions({bucket: bucket_name, permissions: 'storage.objects.create'})
+#				returnedPermissions = request.execute()
+#				print(returnedPermissions)
+				# FIXME check is writeable
+				gs_buckets[bucket_name] = 1
+				return True
+		except BadRequest as e:
+			gs_buckets[bucket_name] = 0
+			print('ERROR: gs bucket does not exist -', bucket_name)
+			return False
+		except Forbidden as e2:
+			gs_buckets[bucket_name] = 0
+			print('ERROR: gs bucket is not accessible by user -', bucket_name)
+			return False
+		except Exception as e3:
+			print(e3)
+			print('ERROR: gs bucket does not exist or is not accessible by user -', bucket_name)
+			gs_buckets[bucket_name] = 0
+			return False			
 
 def aws_key_exists(aws_client, bucket_name, key):
 	s3 = boto3.resource('s3')
@@ -212,7 +267,7 @@ def aws_key_exists(aws_client, bucket_name, key):
 		return False
 
 def add_aws_manifest_metadata(fields, response, path):
-	print(response)
+#	print(response)
 	file_size = response['ContentLength']
 	print ("size:", file_size)
 	md5sum = response['ETag'][1:-1]
@@ -222,8 +277,15 @@ def add_aws_manifest_metadata(fields, response, path):
 	else:
 		print('different checksum')
 	fields['s3_path'] = path
-	fields['s3_modified_date'] = response['ResponseMetadata']['HTTPHeaders']['last-modified'] 
+	fields['s3_modified_date'] = format(response['LastModified'])
 	fields['s3_file_size'] = file_size
+
+def add_blank_aws_manifest_metadata(od):
+	for key, value in od.items(): 
+		value['s3_md5sum'] =''
+		value['s3_path'] = ''
+		value['s3_modified_date'] = ''
+		value['s3_file_size'] = ''
 
 # code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
 # more discussion of how checksum is calculated for s3 here: https://stackoverflow.com/questions/6591047/etag-definition-changed-in-amazon-s3/28877788#28877788
@@ -247,6 +309,9 @@ def calculate_s3_etag(file_path, chunk_size):
     digests_md5 = hashlib.md5(digests)
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
+def calculate_gs_checksums(od, num_threads, chunk_size):
+	return
+
 # FIXME work out manifest fields when --aws and --gs both set
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
@@ -267,11 +332,22 @@ def upload_to_gcloud(od, threads, chunk_size):
 		end = datetime.datetime.now()
 		print('elapsed time for gs upload:', end - start)
 		gs_path = 'gs://' + bucket_name + '/' + file
-		blob = bucket.get_blob(file)		
-		value['gs_path'] = gs_path
-		value['file_size'] = blob.size
-		value['md5sum'] = blob.md5_hash  
+		blob = bucket.get_blob(file)
+		add_gs_manifest_metadata(value, blob, gs_path)		
 
+def add_gs_manifest_metadata(fields, blob, gs_path):
+		fields['gs_md5sum'] = blob.md5_hash  
+		fields['gs_path'] = gs_path
+		fields['gs_modified_date'] = format(blob.updated)
+		fields['gs_file_size'] = blob.size
+
+def add_blank_gs_manifest_metadata(od):
+	for key, fields in od.items(): 
+		fields['gs_md5sum'] = ''
+		fields['gs_path'] = ''
+		fields['gs_modified_date'] = ''
+		fields['gs_file_size'] = ''
+	
 def get_bucket_name(row):
 	return row['study_id'] + '-' + row['consent_code']
 	
