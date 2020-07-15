@@ -166,7 +166,7 @@ def upload_to_aws(od, threads, chunk_size):
 
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value)
-		s3_file = basename(key)
+		s3_file = value['s3_md5sum'] + '/' + basename(key)
 		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
 		
 		if (aws_key_exists(aws_client, bucket_name, key)):
