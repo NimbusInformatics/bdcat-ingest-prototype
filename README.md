@@ -27,7 +27,7 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     python process.py --gs --tsv sample.tsv 
    
 
-manifest file will be located at sample.manifest.tsv
+The output manifest file will be located at sample.manifest.tsv
 
 ## Design Doc
 
@@ -35,3 +35,35 @@ See [20200608 - Data Ingest Brainstorming](https://docs.google.com/document/d/1b
 ## Issues
 
 See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) for tracking issues.
+
+## Input manifest file format
+
+The input manifest file is a TSV file with the following fields:
+
+* study\_id
+* dbgap\_study\_id
+* consent\_code
+* participant\_id
+* specimen\_id
+* experimental\_strategy
+* file\_local\_path
+
+## Output manifest file format
+
+The output manifest file is a TSV file with the following fields:
+
+* study\_id
+* dbgap\_study\_id
+* consent\_code
+* participant\_id
+* specimen\_id
+* experimental\_strategy
+* file\_local\_path
+* gs\_md5sum - checksum provided by google storage. Note that all gs\* fields will be empty if google storage was not selected
+* gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique.
+* gs\_modified\_date - the date that the file was last uploaded or modified
+* gs\_file\_size - the file size reported by google storage
+* s3\_md5sum - checksum provided by aws. Note that all aws\* fields will be empty if google storage was not selected
+* s3\_path - path to aws file. Note that the path includes the checksum to ensure that files are unique.
+* s3\_modified\_date - the date that the file was last uploaded or modified
+* s3\_file\_size - the file size reported by aws
