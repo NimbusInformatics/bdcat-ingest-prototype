@@ -59,8 +59,8 @@ The output manifest file is a TSV file with the following fields:
 * specimen\_id
 * experimental\_strategy
 * file\_local\_path
-* gs\_md5sum - checksum provided by google storage. Note that all gs\* fields will be empty if google storage was not selected
-* gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique.
+* gs\_gs_crc32c - checksum provided by google storage in base64 format. Note that all gs\* fields will be empty if google storage was not selected
+* gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique. It is not using the base64 format, which might lead to illegal key names, but instead the unsigned 32-bit integer value
 * gs\_modified\_date - the date that the file was last uploaded or modified
 * gs\_file\_size - the file size reported by google storage
 * s3\_md5sum - checksum provided by aws. Note that all aws\* fields will be empty if google storage was not selected
