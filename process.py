@@ -25,6 +25,10 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud.exceptions import NotFound
+import base64
+import struct
+import crcmod
+
 
 def main():
 	parser = argparse.ArgumentParser(description='Process TSV file.')
@@ -142,7 +146,7 @@ def verify_aws_buckets(od, test_mode):
 def calculate_aws_checksums(od, num_threads, chunk_size):
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
-		computed_checksum = calculate_s3_etag(key, chunk_size)
+		computed_checksum = calculate_s3_md5sum(key, chunk_size)
 		end = datetime.datetime.now()
 		print('elapsed time for checksum:', end - start)
 		value['s3_md5sum'] = computed_checksum	
@@ -289,7 +293,7 @@ def add_blank_aws_manifest_metadata(od):
 
 # code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
 # more discussion of how checksum is calculated for s3 here: https://stackoverflow.com/questions/6591047/etag-definition-changed-in-amazon-s3/28877788#28877788
-def calculate_s3_etag(file_path, chunk_size):
+def calculate_s3_md5sum(file_path, chunk_size):
     md5s = []
 
     with open(file_path, 'rb') as fp:
@@ -310,9 +314,20 @@ def calculate_s3_etag(file_path, chunk_size):
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
 def calculate_gs_checksums(od, num_threads, chunk_size):
-	return
+	for key, value in od.items(): 
+		start = datetime.datetime.now()			
+		computed_checksum = calculate_gs_checksum(key, chunk_size)
+		end = datetime.datetime.now()
+		print('elapsed time for checksum:', computed_checksum, end - start)
+		value['gs_crc32c'] = computed_checksum	
 
-# FIXME work out manifest fields when --aws and --gs both set
+def calculate_gs_checksum(key, chunk_size):
+	file_bytes = open(key, 'rb').read()
+	crc32c = crcmod.predefined.Crc('crc-32c')
+	crc32c.update(file_bytes)
+
+	return base64.b64encode(crc32c.digest()).decode('utf-8')
+
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
 def upload_to_gcloud(od, threads, chunk_size):    
@@ -336,14 +351,14 @@ def upload_to_gcloud(od, threads, chunk_size):
 		add_gs_manifest_metadata(value, blob, gs_path)		
 
 def add_gs_manifest_metadata(fields, blob, gs_path):
-		fields['gs_md5sum'] = blob.md5_hash  
+		fields['gs_crc32c'] = blob.crc32c  
 		fields['gs_path'] = gs_path
 		fields['gs_modified_date'] = format(blob.updated)
 		fields['gs_file_size'] = blob.size
 
 def add_blank_gs_manifest_metadata(od):
 	for key, fields in od.items(): 
-		fields['gs_md5sum'] = ''
+		fields['gs_crc32c'] = ''
 		fields['gs_path'] = ''
 		fields['gs_modified_date'] = ''
 		fields['gs_file_size'] = ''
