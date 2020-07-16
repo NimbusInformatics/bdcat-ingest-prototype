@@ -53,8 +53,9 @@ def main():
 	read_and_verify_file(od, args) 
 	
 	if (args.gs):
-		calculate_gs_checksums(od, args.threads, args.chunk_size)
-		upload_to_gcloud(od, args.threads, args.chunk_size)
+		gs_crc32c = {}
+		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c)
+		upload_to_gcloud(od, args.threads, args.chunk_size, gs_crc32c)
 	else:
 		add_blank_gs_manifest_metadata(od)
 	if (args.aws):
@@ -313,24 +314,25 @@ def calculate_s3_md5sum(file_path, chunk_size):
     digests_md5 = hashlib.md5(digests)
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
-def calculate_gs_checksums(od, num_threads, chunk_size):
+def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c):
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
-		computed_checksum = calculate_gs_checksum(key, chunk_size)
+		(crc_value, base64_value) = calculate_gs_checksum(key, chunk_size)
 		end = datetime.datetime.now()
-		print('elapsed time for checksum:', computed_checksum, end - start)
-		value['gs_crc32c'] = computed_checksum	
+		print('elapsed time for checksum:', crc_value, base64_value, end - start)
+		gs_crc32c[key] = format(crc_value)
+		value['gs_crc32c'] = base64_value
+
 
 def calculate_gs_checksum(key, chunk_size):
 	file_bytes = open(key, 'rb').read()
 	crc32c = crcmod.predefined.Crc('crc-32c')
 	crc32c.update(file_bytes)
-
-	return base64.b64encode(crc32c.digest()).decode('utf-8')
+	return crc32c.crcValue, base64.b64encode(crc32c.digest()).decode('utf-8')
 
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
-def upload_to_gcloud(od, threads, chunk_size):    
+def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):    
 	storage_client = storage.Client()
 
 	for key, value in od.items(): 
@@ -339,19 +341,28 @@ def upload_to_gcloud(od, threads, chunk_size):
 		print('attempting to upload ' + file + ' to gs://' + bucket_name)
 		bucket = storage_client.bucket(bucket_name)
 		blob = bucket.blob(file)
+		blob.name = gs_crc32c[key]+ '/' + file
 		# Set chunk size to be same as AWS. 
 		# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
 		blob.chunk_size = chunk_size
-		start = datetime.datetime.now()
-		blob.upload_from_filename(key)
-		end = datetime.datetime.now()
-		print('elapsed time for gs upload:', end - start)
-		gs_path = 'gs://' + bucket_name + '/' + file
-		blob = bucket.get_blob(file)
-		add_gs_manifest_metadata(value, blob, gs_path)		
+		blob.crc32c = value['gs_crc32c']
+		try:
+			start = datetime.datetime.now()
+			# set checksum value - google storage will validate the checksum of the upload and delete the file if not matching
+			# FIXME - check with bogus value to make sure
+			blob.upload_from_filename(key)
+			end = datetime.datetime.now()
+			print('elapsed time for gs upload:', end - start)
+			gs_path = 'gs://' + bucket_name + '/' + blob.name			
+			blob = bucket.get_blob(blob.name)
+			add_gs_manifest_metadata(value, blob, gs_path)
+		except BadRequest as e:
+			print('ERROR: problem uploading -', key, e)
+			value['gs_path'] = ''
+			value['gs_modified_date'] = ''
+			value['gs_file_size'] = ''				
 
-def add_gs_manifest_metadata(fields, blob, gs_path):
-		fields['gs_crc32c'] = blob.crc32c  
+def add_gs_manifest_metadata(fields, blob, gs_path): 
 		fields['gs_path'] = gs_path
 		fields['gs_modified_date'] = format(blob.updated)
 		fields['gs_file_size'] = blob.size
