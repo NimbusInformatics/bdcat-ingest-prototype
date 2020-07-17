@@ -92,8 +92,9 @@ def read_and_verify_file(od, args) :
 		exit()
 					
 def process_row(od, row, test_mode):
+	study_id = row['study_id']
 	local_file = row['file_local_path']
-	od[local_file] = row
+	od[study_id + '_' + local_file] = row
 	# confirm file exists and is readable
 	if (isfile(local_file) and access(local_file, R_OK)):
 		if (test_mode):
@@ -131,7 +132,7 @@ def verify_aws_buckets(od, test_mode):
 def calculate_aws_checksums(od, num_threads, chunk_size):
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
-		computed_checksum = calculate_s3_md5sum(key, chunk_size)
+		computed_checksum = calculate_s3_md5sum(value['file_local_path'], chunk_size)
 		end = datetime.datetime.now()
 		print('elapsed time for checksum:', end - start)
 		value['s3_md5sum'] = computed_checksum	
@@ -155,17 +156,17 @@ def upload_to_aws(od, threads, chunk_size):
 
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value)
-		s3_file = value['s3_md5sum'] + '/' + basename(key)
+		s3_file = value['s3_md5sum'] + '/' + basename(value['file_local_path'])
 		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
 		
-		if (aws_key_exists(aws_client, bucket_name, key)):
+		if (aws_key_exists(aws_client, bucket_name, s3_file)):
 			print("Already exists. Skipping ", 's3://', bucket_name, '/', s3_file, sep='')
 			response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
 			add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
 		else:
 			try:
 				start = datetime.datetime.now()
-				aws_client.upload_file(key, bucket_name, s3_file, Config=transfer_config)
+				aws_client.upload_file(value['file_local_path'], bucket_name, s3_file, Config=transfer_config)
 				end = datetime.datetime.now()
 				print('elapsed time for aws upload:', end - start)
 				response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
@@ -301,10 +302,10 @@ def calculate_s3_md5sum(file_path, chunk_size):
 def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c):
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
-		(crc_value, base64_value) = calculate_gs_checksum(key, chunk_size)
+		(crc_value, base64_value) = calculate_gs_checksum(value['file_local_path'], chunk_size)
 		end = datetime.datetime.now()
 		print('elapsed time for checksum:', crc_value, base64_value, end - start)
-		gs_crc32c[key] = format(crc_value)
+		gs_crc32c[value['file_local_path']] = format(crc_value)
 		value['gs_crc32c'] = base64_value
 
 
@@ -321,10 +322,10 @@ def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):
 
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value)
-		file = basename(key)
+		file = basename(value['file_local_path'])
 		print('attempting to upload ' + file + ' to gs://' + bucket_name)
 		bucket = storage_client.bucket(bucket_name)
-		blob = bucket.blob(gs_crc32c[key]+ '/' + file)
+		blob = bucket.blob(gs_crc32c[value['file_local_path']]+ '/' + file)
 		gs_path = 'gs://' + bucket_name + '/' + blob.name			
 		if (blob.exists()):
 			blob.reload()
@@ -339,13 +340,13 @@ def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):
 				start = datetime.datetime.now()
 				# set checksum value - google storage will validate the checksum of the upload and delete the file if not matching
 				# FIXME - check with bogus value to make sure
-				blob.upload_from_filename(key)
+				blob.upload_from_filename(value['file_local_path'])
 				end = datetime.datetime.now()
 				print('elapsed time for gs upload:', end - start)
 				blob = bucket.get_blob(blob.name)
 				add_gs_manifest_metadata(value, blob, gs_path)
 			except BadRequest as e:
-				print('ERROR: problem uploading -', key, e)
+				print('ERROR: problem uploading -', value['file_local_path'], e)
 				value['gs_path'] = ''
 				value['gs_modified_date'] = ''
 				value['gs_file_size'] = ''				
