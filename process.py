@@ -107,27 +107,11 @@ def verify_gs_buckets(od, test_mode):
 	gs_buckets = {}
 	storage_client = storage.Client()
 
-	credentials = service_account.Credentials.from_service_account_file(
-		filename=os.environ["GOOGLE_APPLICATION_CREDENTIALS"],
-		scopes=["https://www.googleapis.com/auth/cloud-platform"],
-	)
-	service = build(
-		"cloudresourcemanager", "v1", credentials=credentials
-	)
-
-	permissions = {
-		"permissions": [
-			"resourcemanager.projects.get",
-			"resourcemanager.projects.delete",
-		]
-	}
-
 	all_buckets_writeable = True
 
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value) 
-		if (gs_bucket_writeable(bucket_name, storage_client, credentials, service, permissions, gs_buckets, test_mode) == False):
-#		if (gs_bucket_writeable(bucket_name, storage_client, '', '', '', gs_buckets, test_mode) == False):		
+		if (gs_bucket_writeable(bucket_name, storage_client, gs_buckets, test_mode) == False):		
 			all_buckets_writeable = False
 	return all_buckets_writeable
 		
@@ -175,7 +159,7 @@ def upload_to_aws(od, threads, chunk_size):
 		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
 		
 		if (aws_key_exists(aws_client, bucket_name, key)):
-			print("Already exists. Skipping", key)
+			print("Already exists. Skipping ", 's3://', bucket_name, '/', s3_file, sep='')
 			response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
 			add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
 		else:
@@ -229,7 +213,7 @@ def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 			return False
 		
 
-def gs_bucket_writeable(bucket_name, storage_client, credentials, service, permissions, gs_buckets, test_mode):
+def gs_bucket_writeable(bucket_name, storage_client, gs_buckets, test_mode):
 	if (bucket_name in gs_buckets):
 		if (gs_buckets[bucket_name] == 1):
 			return True
@@ -239,26 +223,26 @@ def gs_bucket_writeable(bucket_name, storage_client, credentials, service, permi
 		try:
 			bucket = storage_client.get_bucket(bucket_name)
 			if (bucket.exists()):
-				policy = bucket.get_iam_policy()
-				for binding in policy.bindings:
-					print("Role: {}, Members: {}".format(binding["role"], binding["members"]))
-#				request = service.buckets().testIamPermissions({bucket: bucket_name, permissions: 'storage.objects.create'})
-#				returnedPermissions = request.execute()
-#				print(returnedPermissions)
-				# FIXME check is writeable
-				gs_buckets[bucket_name] = 1
-				return True
+				returnedPermissions = bucket.test_iam_permissions('storage.objects.create')
+#				print('PERMISSIONS for', bucket_name, returnedPermissions)
+				if ('storage.objects.create' in returnedPermissions):
+					gs_buckets[bucket_name] = 1
+					return True
+				else:
+					print('ERROR: gs bucket is not writeable', bucket_name)
+					gs_buckets[bucket_name] = 0
+					return False					
 		except BadRequest as e:
 			gs_buckets[bucket_name] = 0
-			print('ERROR: gs bucket does not exist -', bucket_name)
+			print('ERROR: gs bucket does not exist -', bucket_name, e)
 			return False
 		except Forbidden as e2:
 			gs_buckets[bucket_name] = 0
-			print('ERROR: gs bucket is not accessible by user -', bucket_name)
+			print('ERROR: gs bucket is not accessible by user -', bucket_name, e2)
 			return False
 		except Exception as e3:
 			print(e3)
-			print('ERROR: gs bucket does not exist or is not accessible by user -', bucket_name)
+			print('ERROR: gs bucket does not exist or is not accessible by user -', bucket_name, e3)
 			gs_buckets[bucket_name] = 0
 			return False			
 
@@ -340,27 +324,31 @@ def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):
 		file = basename(key)
 		print('attempting to upload ' + file + ' to gs://' + bucket_name)
 		bucket = storage_client.bucket(bucket_name)
-		blob = bucket.blob(file)
-		blob.name = gs_crc32c[key]+ '/' + file
-		# Set chunk size to be same as AWS. 
-		# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
-		blob.chunk_size = chunk_size
-		blob.crc32c = value['gs_crc32c']
-		try:
-			start = datetime.datetime.now()
-			# set checksum value - google storage will validate the checksum of the upload and delete the file if not matching
-			# FIXME - check with bogus value to make sure
-			blob.upload_from_filename(key)
-			end = datetime.datetime.now()
-			print('elapsed time for gs upload:', end - start)
-			gs_path = 'gs://' + bucket_name + '/' + blob.name			
-			blob = bucket.get_blob(blob.name)
+		blob = bucket.blob(gs_crc32c[key]+ '/' + file)
+		gs_path = 'gs://' + bucket_name + '/' + blob.name			
+		if (blob.exists()):
+			blob.reload()
 			add_gs_manifest_metadata(value, blob, gs_path)
-		except BadRequest as e:
-			print('ERROR: problem uploading -', key, e)
-			value['gs_path'] = ''
-			value['gs_modified_date'] = ''
-			value['gs_file_size'] = ''				
+			print("Already exists. Skipping ", 'gs://', bucket_name, '/', blob.name, sep='')
+		else:
+			# Set chunk size to be same as AWS. 
+			# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
+			blob.chunk_size = chunk_size
+			blob.crc32c = value['gs_crc32c']
+			try:
+				start = datetime.datetime.now()
+				# set checksum value - google storage will validate the checksum of the upload and delete the file if not matching
+				# FIXME - check with bogus value to make sure
+				blob.upload_from_filename(key)
+				end = datetime.datetime.now()
+				print('elapsed time for gs upload:', end - start)
+				blob = bucket.get_blob(blob.name)
+				add_gs_manifest_metadata(value, blob, gs_path)
+			except BadRequest as e:
+				print('ERROR: problem uploading -', key, e)
+				value['gs_path'] = ''
+				value['gs_modified_date'] = ''
+				value['gs_file_size'] = ''				
 
 def add_gs_manifest_metadata(fields, blob, gs_path): 
 		fields['gs_path'] = gs_path
