@@ -8,7 +8,9 @@ import argparse
 import datetime
 import hashlib
 import csv
+import signal
 import sys
+import time
 import os
 from os import access, R_OK
 from os.path import isfile, basename
@@ -36,7 +38,7 @@ def main():
 	parser.add_argument('--gs', default=False, action='store_true', help='upload to Google Cloud')
 	parser.add_argument('--aws', default=False, action='store_true', help='upload to AWS')
 	parser.add_argument('--test', default=False, action='store_true', help='test mode')
-	parser.add_argument('--threads', default=10, help='number of concurrent threads')
+	parser.add_argument('--threads', default=os.cpu_count(), help='number of concurrent threads')
 	parser.add_argument('--chunk-size', default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
 
 	# validate args
@@ -47,6 +49,10 @@ def main():
 		print('Error: Either gs or aws needs to be set')
 		parser.print_help()
 		exit()
+
+	print('Script running on', sys.platform, 'with', os.cpu_count(), 'cpus')
+#	if (not args.threads)
+#		args.threads = os.cpu_count()
 
 	# process file
 	od = OrderedDict()
@@ -130,6 +136,7 @@ def verify_aws_buckets(od, test_mode):
 	return all_buckets_writeable
 
 def calculate_aws_checksums(od, num_threads, chunk_size):
+	print('calculating aws checksums with', num_threads, 'threads')
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
 		computed_checksum = calculate_s3_md5sum(value['file_local_path'], chunk_size)
@@ -300,6 +307,7 @@ def calculate_s3_md5sum(file_path, chunk_size):
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
 def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c):
+	print('calculating gs checksums with', num_threads, 'threads')
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
 		(crc_value, base64_value) = calculate_gs_checksum(value['file_local_path'], chunk_size)
@@ -307,7 +315,6 @@ def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c):
 		print('elapsed time for checksum:', crc_value, base64_value, end - start)
 		gs_crc32c[value['file_local_path']] = format(crc_value)
 		value['gs_crc32c'] = base64_value
-
 
 def calculate_gs_checksum(key, chunk_size):
 	file_bytes = open(key, 'rb').read()
@@ -378,6 +385,26 @@ def create_manifest_file(manifest_filepath, od):
 			tsv_writer.writerow(value.values())
 		out_file.close()
 	print(od)
+
+# adapted from here: https://stackoverflow.com/questions/18114560/python-catch-ctrl-c-command-prompt-really-want-to-quit-y-n-resume-executi/18115530
+def exit_and_write_manifest_file(signum, frame):
+    # restore the original signal handler as otherwise evil things will happen
+    # in raw_input when CTRL+C is pressed, and our signal handler is not re-entrant
+    signal.signal(signal.SIGINT, original_sigint)
+
+    try:
+        if input("\nReally quit? (y/n)> ").lower().startswith('y'):
+        	# FIXME close manifest file here
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("Ok, quitting")
+        sys.exit(1)
+
+    # restore the exit gracefully handler here    
+    signal.signal(signal.SIGINT, exit_and_write_manifest_file)
        
 if __name__ == '__main__':
+    original_sigint = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, exit_and_write_manifest_file)
     main()
