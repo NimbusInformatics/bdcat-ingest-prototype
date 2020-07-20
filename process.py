@@ -7,6 +7,7 @@ import argparse
 #import requests
 import datetime
 import hashlib
+import fileinput
 import csv
 import signal
 import sys
@@ -19,7 +20,7 @@ from collections import OrderedDict
 # for aws s3
 import logging
 import boto3
-from botocore.exceptions import ClientError
+import botocore
 
 # for google storage
 from google.cloud import storage
@@ -31,8 +32,49 @@ import base64
 import struct
 import crcmod
 
+out_file_path = ''
+out_file = ''
 
 def main():
+	args = parse_args()
+	print('Script running on', sys.platform, 'with', os.cpu_count(), 'cpus')
+
+	# process file
+	od = OrderedDict()
+	read_and_verify_file(od, args) 
+	add_blank_gs_manifest_metadata(od)
+	add_blank_aws_manifest_metadata(od)	
+
+	global out_file
+	out_file = get_out_file_pointer(args.tsv.name)	
+
+	if (args.gs):
+		gs_crc32c = {}
+		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c)
+		# write out file with calculated checksum info
+		update_manifest_file(out_file, od)	
+		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, gs_crc32c)
+
+	if (args.aws):
+		calculate_aws_checksums(od, args.threads, args.chunk_size)
+		# write out file with calculated checksum info
+		update_manifest_file(out_file, od)	
+		upload_to_aws(od, out_file, args.threads, args.chunk_size)
+		
+	out_file.close()
+
+def get_out_file_pointer(input_manifest_file_path):
+	manifest_filepath = input_manifest_file_path
+	if (manifest_filepath.endswith('.tsv')):
+		manifest_filepath = manifest_filepath.replace(".tsv", ".manifest.tsv")	
+	else:
+		manifest_filepath += 'manifest.tsv'
+	global out_file_path
+	out_file_path = manifest_filepath
+	f = open(manifest_filepath, 'wt')
+	return f		
+
+def parse_args():
 	parser = argparse.ArgumentParser(description='Process TSV file.')
 	parser.add_argument('--tsv', required=True, type=argparse.FileType('r'), help='tsv file')
 	parser.add_argument('--gs', default=False, action='store_true', help='upload to Google Cloud')
@@ -40,8 +82,7 @@ def main():
 	parser.add_argument('--test', default=False, action='store_true', help='test mode')
 	parser.add_argument('--threads', default=os.cpu_count(), help='number of concurrent threads')
 	parser.add_argument('--chunk-size', default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
-
-	# validate args
+	
 	args = parser.parse_args()
 	if (len(sys.argv) == 0):
 		parser.print_help()
@@ -49,33 +90,7 @@ def main():
 		print('Error: Either gs or aws needs to be set')
 		parser.print_help()
 		exit()
-
-	print('Script running on', sys.platform, 'with', os.cpu_count(), 'cpus')
-#	if (not args.threads)
-#		args.threads = os.cpu_count()
-
-	# process file
-	od = OrderedDict()
-	read_and_verify_file(od, args) 
-	
-	if (args.gs):
-		gs_crc32c = {}
-		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c)
-		upload_to_gcloud(od, args.threads, args.chunk_size, gs_crc32c)
-	else:
-		add_blank_gs_manifest_metadata(od)
-	if (args.aws):
-		calculate_aws_checksums(od, args.threads, args.chunk_size)
-		upload_to_aws(od, args.threads, args.chunk_size)
-	else:
-		add_blank_aws_manifest_metadata(od)	
-		
-	manifest_filepath = args.tsv.name
-	if (manifest_filepath.endswith('.tsv')):
-		manifest_filepath = manifest_filepath.replace(".tsv", ".manifest.tsv")	
-	else:
-		manifest_filepath += 'manifest.tsv'
-	create_manifest_file(manifest_filepath, od)
+	return args
 
 def read_and_verify_file(od, args) :
 	reader = csv.DictReader(args.tsv, dialect='excel-tab')
@@ -153,13 +168,9 @@ def calculate_aws_checksums(od, num_threads, chunk_size):
 # Add mulipart upload resume option
 # https://gist.github.com/holyjak/b5613c50f37865f0e3953b93c39bd61a
  
-def upload_to_aws(od, threads, chunk_size): 
+def upload_to_aws(od, out_file, threads, chunk_size): 
 	aws_client = boto3.client('s3')
 	transfer_config = boto3.s3.transfer.TransferConfig(multipart_chunksize=chunk_size, max_concurrency=threads, use_threads=True)  
-
-    #TODO confirm all files with unique names???
-    #TODO confirm readable cloud dir ??
-    #TODO do we care if file already exists?
 
 	for key, value in od.items(): 
 		bucket_name = get_bucket_name(value)
@@ -178,10 +189,11 @@ def upload_to_aws(od, threads, chunk_size):
 				print('elapsed time for aws upload:', end - start)
 				response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
 				add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
-			except ClientError as e:
+			except botocore.exceptions.ClientError as e:
 				logging.error(e)
 				print(e)
 				add_blank_aws_manifest_metadata(value)
+		update_manifest_file(out_file, od)	
 
 def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 	if (bucket_name in aws_buckets):
@@ -324,7 +336,7 @@ def calculate_gs_checksum(key, chunk_size):
 
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
-def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):    
+def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, gs_crc32c):    
 	storage_client = storage.Client()
 
 	for key, value in od.items(): 
@@ -357,6 +369,7 @@ def upload_to_gcloud(od, threads, chunk_size, gs_crc32c):
 				value['gs_path'] = ''
 				value['gs_modified_date'] = ''
 				value['gs_file_size'] = ''				
+		update_manifest_file(out_file, od)	
 
 def add_gs_manifest_metadata(fields, blob, gs_path): 
 		fields['gs_path'] = gs_path
@@ -372,39 +385,32 @@ def add_blank_gs_manifest_metadata(od):
 	
 def get_bucket_name(row):
 	return row['study_id'] + '-' + row['consent_code']
-	
-def create_manifest_file(manifest_filepath, od):
-	isfirstrow = True
-	with open(manifest_filepath, 'wt') as out_file:
-		tsv_writer = csv.writer(out_file, delimiter='\t')
-		for key, value in od.items():
-			if (isfirstrow):
-				# print header row
-				tsv_writer.writerow(value.keys())
-				isfirstrow = False 
-			tsv_writer.writerow(value.values())
-		out_file.close()
-	print(od)
 
+def update_manifest_file(f, od):
+	# start from beginning of file
+	f.seek(0)
+	f.truncate()
+	
+	isfirstrow = True
+	tsv_writer = csv.writer(f, delimiter='\t')
+	for key, value in od.items():
+		if (isfirstrow):
+			# print header row
+			tsv_writer.writerow(value.keys())
+			isfirstrow = False 
+		tsv_writer.writerow(value.values())
+	print(od)
+	# we don't close the file until the end of the operation
+	
 # adapted from here: https://stackoverflow.com/questions/18114560/python-catch-ctrl-c-command-prompt-really-want-to-quit-y-n-resume-executi/18115530
 def exit_and_write_manifest_file(signum, frame):
-    # restore the original signal handler as otherwise evil things will happen
-    # in raw_input when CTRL+C is pressed, and our signal handler is not re-entrant
-    signal.signal(signal.SIGINT, original_sigint)
-
-    try:
-        if input("\nReally quit? (y/n)> ").lower().startswith('y'):
-        	# FIXME close manifest file here
-            sys.exit(1)
-
-    except KeyboardInterrupt:
-        print("Ok, quitting")
-        sys.exit(1)
-
-    # restore the exit gracefully handler here    
-    signal.signal(signal.SIGINT, exit_and_write_manifest_file)
+	print ("Detected Quit. Please use the resume manifest file '", out_file_path, "'to resume your job.", sep ='')
+	if (out_file):
+		out_file.close()
+	sys.exit(1)
        
 if __name__ == '__main__':
-    original_sigint = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, exit_and_write_manifest_file)
+    signal.signal(signal.SIGTERM, exit_and_write_manifest_file)    
+    signal.signal(signal.SIGHUP, exit_and_write_manifest_file)    
     main()
