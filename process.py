@@ -42,26 +42,28 @@ def main():
 	# process file
 	od = OrderedDict()
 	read_and_verify_file(od, args) 
-	add_blank_gs_manifest_metadata(od)
-	add_blank_aws_manifest_metadata(od)	
+	if (not args.resume):
+		add_blank_gs_manifest_metadata(od)
+		add_blank_aws_manifest_metadata(od)	
 
 	global out_file
 	out_file = get_out_file_pointer(args.tsv.name)	
 
 	if (args.gs):
 		gs_crc32c = {}
-		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c)
+		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c, args.resume)
 		# write out file with calculated checksum info
 		update_manifest_file(out_file, od)	
-		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, gs_crc32c)
+		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, gs_crc32c, args.resume)
 
 	if (args.aws):
-		calculate_aws_checksums(od, args.threads, args.chunk_size)
+		calculate_aws_checksums(od, args.threads, args.chunk_size, args.resume)
 		# write out file with calculated checksum info
 		update_manifest_file(out_file, od)	
-		upload_to_aws(od, out_file, args.threads, args.chunk_size)
+		upload_to_aws(od, out_file, args.threads, args.chunk_size, args.resume)
 		
 	out_file.close()
+	print("Done. Receipt manifest located at", out_file_path)
 
 def get_out_file_pointer(input_manifest_file_path):
 	manifest_filepath = input_manifest_file_path
@@ -80,6 +82,7 @@ def parse_args():
 	parser.add_argument('--gs', default=False, action='store_true', help='upload to Google Cloud')
 	parser.add_argument('--aws', default=False, action='store_true', help='upload to AWS')
 	parser.add_argument('--test', default=False, action='store_true', help='test mode')
+	parser.add_argument('--resume', default=False, action='store_true', help='run process in RESUME mode')
 	parser.add_argument('--threads', default=os.cpu_count(), help='number of concurrent threads')
 	parser.add_argument('--chunk-size', default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
 	
@@ -90,6 +93,10 @@ def parse_args():
 		print('Error: Either gs or aws needs to be set')
 		parser.print_help()
 		exit()
+# 	if (args.test and args.resume):
+# 		print('Error: --test mode can not be run with --resume mode')
+# 		parser.print_help()
+# 		exit()		
 	return args
 
 def read_and_verify_file(od, args) :
@@ -150,7 +157,7 @@ def verify_aws_buckets(od, test_mode):
 			all_buckets_writeable = False
 	return all_buckets_writeable
 
-def calculate_aws_checksums(od, num_threads, chunk_size):
+def calculate_aws_checksums(od, num_threads, chunk_size, resume_mode):
 	print('calculating aws checksums with', num_threads, 'threads')
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
@@ -168,11 +175,15 @@ def calculate_aws_checksums(od, num_threads, chunk_size):
 # Add mulipart upload resume option
 # https://gist.github.com/holyjak/b5613c50f37865f0e3953b93c39bd61a
  
-def upload_to_aws(od, out_file, threads, chunk_size): 
+def upload_to_aws(od, out_file, threads, chunk_size, resume_mode): 
 	aws_client = boto3.client('s3')
 	transfer_config = boto3.s3.transfer.TransferConfig(multipart_chunksize=chunk_size, max_concurrency=threads, use_threads=True)  
 
 	for key, value in od.items(): 
+		print('ROW', value)
+		if (resume_mode and 's3_path' in value.keys() and value['s3_path'].startswith('s3://')):
+			print("Already uploaded. Skipping", value['s3_path'])
+			continue 
 		bucket_name = get_bucket_name(value)
 		s3_file = value['s3_md5sum'] + '/' + basename(value['file_local_path'])
 		print('attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
@@ -318,7 +329,7 @@ def calculate_s3_md5sum(file_path, chunk_size):
     digests_md5 = hashlib.md5(digests)
     return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
-def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c):
+def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c, resume_mode):
 	print('calculating gs checksums with', num_threads, 'threads')
 	for key, value in od.items(): 
 		start = datetime.datetime.now()			
@@ -336,10 +347,16 @@ def calculate_gs_checksum(key, chunk_size):
 
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
-def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, gs_crc32c):    
+def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, gs_crc32c, resume_mode):    
 	storage_client = storage.Client()
 
-	for key, value in od.items(): 
+	for key, value in od.items():
+		print(value)
+		if (resume_mode and 'gs_path' in value.keys() and value['gs_path'].startswith('gs://')):
+			print("ROW", value)
+			print(value['gs_path'])
+			print("Already uploaded. Skipping", value['gs_path'])
+			continue 
 		bucket_name = get_bucket_name(value)
 		file = basename(value['file_local_path'])
 		print('attempting to upload ' + file + ' to gs://' + bucket_name)
