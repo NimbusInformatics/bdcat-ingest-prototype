@@ -16,6 +16,9 @@ import os
 from os import access, R_OK
 from os.path import isfile, basename
 from collections import OrderedDict 
+import threading
+import concurrent.futures
+import multiprocessing.pool
 
 # for aws s3
 import logging
@@ -51,17 +54,17 @@ def main():
 
 	if (args.gs):
 		gs_crc32c = {}
-		calculate_gs_checksums(od, args.threads, args.chunk_size, gs_crc32c, args.resume)
-		# write out file with calculated checksum info
-		update_manifest_file(out_file, od)	
+		calculate_gs_checksums(od, args.threads, gs_crc32c, out_file, args.resume)
 		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, gs_crc32c, args.resume)
 
 	if (args.aws):
-		calculate_aws_checksums(od, args.threads, args.chunk_size, args.resume)
-		# write out file with calculated checksum info
-		update_manifest_file(out_file, od)	
+		calculate_aws_checksums(od, args.threads, args.chunk_size, out_file, args.resume)
 		upload_to_aws(od, out_file, args.threads, args.chunk_size, args.resume)
-		
+
+	# do one last refresh in case the resume file was actually complete
+	if (args.resume):
+		update_manifest_file(out_file, od)
+				
 	out_file.close()
 	print("Done. Receipt manifest located at", out_file_path)
 
@@ -157,15 +160,21 @@ def verify_aws_buckets(od, test_mode):
 			all_buckets_writeable = False
 	return all_buckets_writeable
 
-def calculate_aws_checksums(od, num_threads, chunk_size, resume_mode):
+def calculate_aws_checksums(od, num_threads, chunk_size, out_file, resume_mode):
 	print('calculating aws checksums with', num_threads, 'threads')
-	for key, value in od.items(): 
-		start = datetime.datetime.now()			
-		computed_checksum = calculate_s3_md5sum(value['file_local_path'], chunk_size)
-		end = datetime.datetime.now()
-		print('elapsed time for checksum:', end - start)
-		value['s3_md5sum'] = computed_checksum	
+	start = datetime.datetime.now()
+	with concurrent.futures.ThreadPoolExecutor(num_threads) as executor:	
+		futures = [executor.submit(calculate_s3_md5sum, value, chunk_size, od, out_file, resume_mode) for key, value in od.items()]
+		print("Executing total", len(futures), "jobs")
 
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+				print("Processed job", idx, "result", res)	
+			except ValueError as e:
+				print(e)
+	end = datetime.datetime.now()
+	print('elapsed time for aws checksums:', end - start)
 
 # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/s3-uploading-files.html
 # The upload_file method handles large files by splitting them into smaller chunks
@@ -180,7 +189,6 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 	transfer_config = boto3.s3.transfer.TransferConfig(multipart_chunksize=chunk_size, max_concurrency=threads, use_threads=True)  
 
 	for key, value in od.items(): 
-		print('ROW', value)
 		if (resume_mode and 's3_path' in value.keys() and value['s3_path'].startswith('s3://')):
 			print("Already uploaded. Skipping", value['s3_path'])
 			continue 
@@ -309,41 +317,70 @@ def add_blank_aws_manifest_metadata(od):
 
 # code taken from https://stackoverflow.com/questions/12186993/what-is-the-algorithm-to-compute-the-amazon-s3-etag-for-a-file-larger-than-5gb#answer-19896823
 # more discussion of how checksum is calculated for s3 here: https://stackoverflow.com/questions/6591047/etag-definition-changed-in-amazon-s3/28877788#28877788
-def calculate_s3_md5sum(file_path, chunk_size):
-    md5s = []
+def calculate_s3_md5sum(value, chunk_size, od, out_file, resume_mode):
+	if (resume_mode and 's3_md5sum' in value.keys() and len(value['s3_md5sum']) > 0):
+		print('s3_md5sum already calculated for', value['file_local_path'])
+		return
+		
+	md5s = []
+	start = datetime.datetime.now()
+	print('start=', start)
+	with open(value['file_local_path'], 'rb') as fp:
+		while True:
+			data = fp.read(chunk_size)
+			if not data:
+				break
+			md5s.append(hashlib.md5(data))
 
-    with open(file_path, 'rb') as fp:
-        while True:
-            data = fp.read(chunk_size)
-            if not data:
-                break
-            md5s.append(hashlib.md5(data))
+	computed_checksum = ''
+	if len(md5s) < 1:
+		computed_checksum = '{}'.format(hashlib.md5().hexdigest())
+	elif len(md5s) == 1:
+		computed_checksum = '{}'.format(md5s[0].hexdigest())
+	else:
+		digests = b''.join(m.digest() for m in md5s)
+		digests_md5 = hashlib.md5(digests)
+		computed_checksum = '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
 
-    if len(md5s) < 1:
-        return '{}'.format(hashlib.md5().hexdigest())
+	end = datetime.datetime.now()
+	print('elapsed time for checksum', computed_checksum, ':', end - start)
+	value['s3_md5sum'] = computed_checksum
+	update_manifest_file(out_file, od)	
 
-    if len(md5s) == 1:
-        return '{}'.format(md5s[0].hexdigest())
-
-    digests = b''.join(m.digest() for m in md5s)
-    digests_md5 = hashlib.md5(digests)
-    return '{}-{}'.format(digests_md5.hexdigest(), len(md5s))
-
-def calculate_gs_checksums(od, num_threads, chunk_size, gs_crc32c, resume_mode):
+def calculate_gs_checksums(od, num_threads, gs_crc32c, out_file, resume_mode):
 	print('calculating gs checksums with', num_threads, 'threads')
-	for key, value in od.items(): 
-		start = datetime.datetime.now()			
-		(crc_value, base64_value) = calculate_gs_checksum(value['file_local_path'], chunk_size)
-		end = datetime.datetime.now()
-		print('elapsed time for checksum:', crc_value, base64_value, end - start)
-		gs_crc32c[value['file_local_path']] = format(crc_value)
-		value['gs_crc32c'] = base64_value
+	start = datetime.datetime.now()
+	with concurrent.futures.ThreadPoolExecutor(num_threads) as executor:	
+		futures = [executor.submit(calculate_gs_checksum, value, gs_crc32c, od, out_file, resume_mode) for key, value in od.items()]
+		print("Executing total", len(futures), "jobs")
 
-def calculate_gs_checksum(key, chunk_size):
-	file_bytes = open(key, 'rb').read()
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+				print("Processed job", idx, "result", res)	
+			except ValueError as e:
+				print(e)
+	end = datetime.datetime.now()
+	print('elapsed time for gs checksums:', end - start)
+
+
+def calculate_gs_checksum(value, gs_crc32c, od, out_file, resume_mode):
+	if (resume_mode and 'gs_crc32c' in value.keys() and len(value['gs_crc32c']) > 0):
+		unsigned_int = format(struct.unpack('>I', base64.b64decode(value['gs_crc32c']))[0])
+		gs_crc32c[value['file_local_path']] = unsigned_int
+		print('gs_crc32c already calculated for', value['file_local_path'], unsigned_int)
+		return
+		
+	start = datetime.datetime.now()			
+	file_bytes = open(value['file_local_path'], 'rb').read()
 	crc32c = crcmod.predefined.Crc('crc-32c')
 	crc32c.update(file_bytes)
-	return crc32c.crcValue, base64.b64encode(crc32c.digest()).decode('utf-8')
+	end = datetime.datetime.now()
+	base64_value = base64.b64encode(crc32c.digest()).decode('utf-8')
+	print('elapsed time for checksum:', crc32c.crcValue, base64_value, end - start)
+	value['gs_crc32c'] = base64_value
+	gs_crc32c[value['file_local_path']] = format(crc32c.crcValue)
+	update_manifest_file(out_file, od)
 
 # FIXME set up https://cloud.google.com/storage/docs/gsutil/commands/cp#parallel-composite-uploads
 # ALSO SEE https://cloud.google.com/storage/docs/working-with-big-data#composite    			
@@ -351,10 +388,8 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, gs_crc32c, res
 	storage_client = storage.Client()
 
 	for key, value in od.items():
-		print(value)
+#		print(value)
 		if (resume_mode and 'gs_path' in value.keys() and value['gs_path'].startswith('gs://')):
-			print("ROW", value)
-			print(value['gs_path'])
 			print("Already uploaded. Skipping", value['gs_path'])
 			continue 
 		bucket_name = get_bucket_name(value)
@@ -404,19 +439,20 @@ def get_bucket_name(row):
 	return row['study_id'] + '-' + row['consent_code']
 
 def update_manifest_file(f, od):
-	# start from beginning of file
-	f.seek(0)
-	f.truncate()
+	with threading.Lock():
+		# start from beginning of file
+		f.seek(0)
+		f.truncate()
 	
-	isfirstrow = True
-	tsv_writer = csv.writer(f, delimiter='\t')
-	for key, value in od.items():
-		if (isfirstrow):
-			# print header row
-			tsv_writer.writerow(value.keys())
-			isfirstrow = False 
-		tsv_writer.writerow(value.values())
-	print(od)
+		isfirstrow = True
+		tsv_writer = csv.writer(f, delimiter='\t')
+		for key, value in od.items():
+			if (isfirstrow):
+				# print header row
+				tsv_writer.writerow(value.keys())
+				isfirstrow = False 
+			tsv_writer.writerow(value.values())
+#	print(od)
 	# we don't close the file until the end of the operation
 	
 # adapted from here: https://stackoverflow.com/questions/18114560/python-catch-ctrl-c-command-prompt-really-want-to-quit-y-n-resume-executi/18115530
