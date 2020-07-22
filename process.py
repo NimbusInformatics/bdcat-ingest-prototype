@@ -3,7 +3,7 @@
 # python process.py --aws --tsv sample.tsv 
 
 import argparse
-#import subprocess
+import subprocess
 #import requests
 import datetime
 import hashlib
@@ -86,8 +86,8 @@ def parse_args():
 	parser.add_argument('--aws', default=False, action='store_true', help='upload to AWS')
 	parser.add_argument('--test', default=False, action='store_true', help='test mode')
 	parser.add_argument('--resume', default=False, action='store_true', help='run process in RESUME mode')
-	parser.add_argument('--threads', default=os.cpu_count(), help='number of concurrent threads')
-	parser.add_argument('--chunk-size', default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
+	parser.add_argument('--threads', type=int, default=os.cpu_count(), help='number of concurrent threads')
+	parser.add_argument('--chunk-size', type=int, default=8 * 1024 * 1024, help='mulipart-chunk-size for uploading')
 	
 	args = parser.parse_args()
 	if (len(sys.argv) == 0):
@@ -403,19 +403,23 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, gs_crc32c, res
 			add_gs_manifest_metadata(value, blob, gs_path)
 			print("Already exists. Skipping ", 'gs://', bucket_name, '/', blob.name, sep='')
 		else:
-			# Set chunk size to be same as AWS. 
-			# ALSO A WORKAROUND for timeout due to slow upload speed. See https://github.com/googleapis/python-storage/issues/74
-			blob.chunk_size = chunk_size
-			blob.crc32c = value['gs_crc32c']
 			try:
 				start = datetime.datetime.now()
-				# set checksum value - google storage will validate the checksum of the upload and delete the file if not matching
-				# FIXME - check with bogus value to make sure
-				blob.upload_from_filename(value['file_local_path'])
+				# Note that gsutil automatically handles resumable transfers
+				# https://cloud.google.com/storage/docs/gsutil/addlhelp/ScriptingProductionTransfers
+				subprocess.check_call([
+					'gsutil',
+					'-o', 'GSUtil:parallel_composite_upload_threshold=%s' % ('150M'),
+					'cp', value['file_local_path'], 'gs://%s/%s' % (bucket_name, blob.name)
+				])				
 				end = datetime.datetime.now()
 				print('elapsed time for gs upload:', end - start)
 				blob = bucket.get_blob(blob.name)
-				add_gs_manifest_metadata(value, blob, gs_path)
+				if (value['gs_crc32c'] == blob.crc32c):
+					print('crc32c matches:', blob.crc32c)
+					add_gs_manifest_metadata(value, blob, gs_path)
+				else:
+					print('no crc32c match')
 			except BadRequest as e:
 				print('ERROR: problem uploading -', value['file_local_path'], e)
 				value['gs_path'] = ''
