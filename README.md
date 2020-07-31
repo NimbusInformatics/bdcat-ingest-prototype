@@ -42,11 +42,11 @@ The input manifest file is a TSV file with the following fields:
 
 * study\_id
 * dbgap\_study\_id
-* consent\_code
+* consent\group
 * participant\_id
-* specimen\_id
+* sample\_id
 * experimental\_strategy
-* file\_local\_path
+* input\_file\_path
 
 ## Output manifest file format
 
@@ -54,11 +54,11 @@ The output manifest file is a TSV file with the following fields:
 
 * study\_id
 * dbgap\_study\_id
-* consent\_code
+* consent\_group
 * participant\_id
-* specimen\_id
+* sample\_id
 * experimental\_strategy
-* file\_local\_path
+* input\_file\_path
 * gs\_gs_crc32c - checksum provided by google storage in base64 format. Note that all gs\* fields will be empty if google storage was not selected
 * gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique. It is not using the base64 format, which might lead to illegal key names, but instead the unsigned 32-bit integer value
 * gs\_modified\_date - the date that the file was last uploaded or modified
