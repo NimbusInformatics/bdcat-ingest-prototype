@@ -1,3 +1,3 @@
-study_id	dbgap_study_id	consent_group	participant_id	specimen_id	experimental_strategy	input_file_path
+study_id	dbgap_study_id	consent_group	subject_id	specimen_id	experimental_strategy	input_file_path
 avteststudy2	dbgapavteststudy	ghi	456	777	XX	s3://avteststudy-abc/620f0b67a91f7f74151bc5be745b7110/xsmall.2.txt
 avteststudy2	dbgapavteststudy	ghi	456	777	XX	gs://avteststudy-abc/2566472073/xsmall.2.txt
