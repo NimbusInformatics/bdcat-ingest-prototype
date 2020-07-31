@@ -2,7 +2,29 @@
 
 Repo for experimenting with data preparation and upload for the BDCat project.
 
-## Setup
+## Setup Instructions for Ubuntu 20.04 LTS
+
+    sudo apt-get update
+    sudo apt install python3-pip
+    sudo apt install awscli
+    sudo apt-get install gcc python-dev python-setuptools
+    sudo pip3 install boto3
+    sudo pip3 install google-cloud-storage
+    sudo pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+    sudo pip3 install --no-cache-dir -U crcmod
+    sudo pip3 install --no-cache-dir -U crcmod
+    sudo apt-get install gcc python-dev python-setuptools libffi-dev
+    sudo pip3 install gsutil
+    echo export PATH=${PATH}:$HOME/gsutil >> ~/.bashrc
+
+    # load credentials for google cloud, if necessary
+    export GOOGLE_APPLICATION_CREDENTIALS="<path to credentials .json file>"
+    gsutil config
+
+    # load credentials for aws, if necesary
+    aws configure
+
+## Setup Instructions for MacOS
 
     conda create -n python_3_7_4_20200619 python=3.7.4
     conda create --name nimbus--data-ingest python=3.7.4
@@ -10,7 +32,7 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     pip install awscli
     pip install boto3
     pip install google-cloud-storage
-	pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+    pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
 	
 1. Create large file called big_binary.MOV in current directory (should be > 8 MB)
 
@@ -40,13 +62,13 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 The input manifest file is a TSV file with the following fields:
 
-* study\_id
+* study\_id - required field
 * dbgap\_study\_id
-* consent\group
+* consent_group - required field
 * participant\_id
 * sample\_id
 * experimental\_strategy
-* input\_file\_path
+* input\_file\_path - required field. Either the local file, s3:// path, or gs:// path to be transferred
 
 ## Output manifest file format
 
@@ -54,11 +76,12 @@ The output manifest file is a TSV file with the following fields:
 
 * study\_id
 * dbgap\_study\_id
-* consent\_group
+* consent_group
 * participant\_id
 * sample\_id
 * experimental\_strategy
 * input\_file\_path
+* md5sum
 * gs\_gs_crc32c - checksum provided by google storage in base64 format. Note that all gs\* fields will be empty if google storage was not selected
 * gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique. It is not using the base64 format, which might lead to illegal key names, but instead the unsigned 32-bit integer value
 * gs\_modified\_date - the date that the file was last uploaded or modified
