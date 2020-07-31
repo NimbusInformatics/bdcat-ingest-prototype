@@ -127,6 +127,7 @@ def read_and_verify_file(od, args) :
 def process_row(od, row, test_mode):
 	study_id = row['study_id']
 	local_file = row['input_file_path']
+	row['md5sum'] = ''
 	od[study_id + '_' + local_file] = row
 	# confirm file exists and is readable
 	if(local_file.startswith("gs://")):
@@ -256,11 +257,13 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 		else:
 			try:
 				if (value['input_file_path'].startswith("s3://")):
-					handle_aws_copy(aws_client, value, bucket_name, s3_file)
+					handle_aws_copy(value, bucket_name, s3_file)
 				elif (value['input_file_path'].startswith("gs://")):
-					handle_gs_to_s3_transfer(aws_client, value, bucket_name, s3_file)
+					handle_gs_to_s3_transfer(value, bucket_name, s3_file)
 				else:	
 					handle_aws_file_upload(aws_client, transfer_config, value, bucket_name, s3_file)
+				response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
+				add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
 			except botocore.exceptions.ClientError as e:
 				logging.error(e)
 				print(e)
@@ -272,11 +275,10 @@ def handle_aws_file_upload(aws_client, transfer_config, value, bucket_name, s3_f
 	aws_client.upload_file(value['input_file_path'], bucket_name, s3_file, Config=transfer_config)
 	end = datetime.datetime.now()
 	print('elapsed time for aws upload:', end - start)
-	response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
-	add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
+
 
 # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#S3.Client.copy
-def handle_aws_copy(aws_client, value, tobucket, tokey):
+def handle_aws_copy(value, tobucket, tokey):
 	obj = urlparse(value['input_file_path'], allow_fragments=False)
 		
 	s3 = boto3.resource('s3')
@@ -285,18 +287,14 @@ def handle_aws_copy(aws_client, value, tobucket, tokey):
 		'Key': obj.path.lstrip('/')
 	}
 	s3.meta.client.copy(copy_source, tobucket, tokey)
-	response = aws_client.head_object(Bucket=tobucket, Key=tokey)
-	add_aws_manifest_metadata(value, response, 's3://' + tobucket + '/' + tokey)
 
-def handle_gs_to_s3_transfer(aws_client, value, tobucket, tokey):
+def handle_gs_to_s3_transfer(value, tobucket, tokey):
 	p1 = subprocess.Popen(["gsutil", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)
 	p2 = subprocess.Popen(["aws", "s3", "cp", "-", 's3://%s/%s' % (tobucket, tokey)], stdin=p1.stdout)
 	p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
 	print(p2.stdout)
 	output = p2.communicate()[0]
 	print(output)
-	response = aws_client.head_object(Bucket=tobucket, Key=tokey)
-	add_aws_manifest_metadata(value, response, 's3://' + tobucket + '/' + tokey)
 
 def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 	if (bucket_name in aws_buckets):
