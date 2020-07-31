@@ -401,6 +401,8 @@ def add_aws_manifest_metadata(fields, response, path):
 	file_size = response['ContentLength']
 	print ("size:", file_size)
 	md5sum = response['ETag'][1:-1]
+	if ("-" not in md5sum):
+		fields['md5sum'] = md5sum
 	print('checksum check:', fields['s3_md5sum'], ':', md5sum)
 	if (fields['s3_md5sum'] == md5sum):
 		print('same checksum')
@@ -589,6 +591,8 @@ def add_gs_manifest_metadata(fields, blob, gs_path):
 		fields['gs_path'] = gs_path
 		fields['gs_modified_date'] = format(blob.updated)
 		fields['gs_file_size'] = blob.size
+		if (blob.md5_hash):
+			fields['md5sum'] = blob.md5_hash
 
 def add_blank_gs_manifest_metadata(od):
 	for key, fields in od.items():
