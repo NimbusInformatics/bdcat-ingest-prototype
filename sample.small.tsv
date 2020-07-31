@@ -1,0 +1,3 @@
+study_id	dbgap_study_id	consent_group	participant_id	specimen_id	experimental_strategy	input_file_path
+avteststudy	dbgapavteststudy	abc	456	777	XX	sample_data/xsmall.1.txt
+avteststudy	dbgapavteststudy	abc	456	777	XX	sample_data/xsmall.2.txt
