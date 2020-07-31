@@ -4,16 +4,13 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 ## Setup Instructions for Ubuntu 20.04 LTS
 
-    sudo apt-get update
-    sudo apt install python3-pip
-    sudo apt install awscli
-    sudo apt-get install gcc python-dev python-setuptools
+    sudo apt update
+    sudo apt -y install python3-pip awscli gcc python-dev python-setuptools libffi-dev
+
     sudo pip3 install boto3
     sudo pip3 install google-cloud-storage
     sudo pip3 install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
     sudo pip3 install --no-cache-dir -U crcmod
-    sudo pip3 install --no-cache-dir -U crcmod
-    sudo apt-get install gcc python-dev python-setuptools libffi-dev
     sudo pip3 install gsutil
     echo export PATH=${PATH}:$HOME/gsutil >> ~/.bashrc
 
@@ -33,6 +30,7 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     pip install boto3
     pip install google-cloud-storage
     pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+    conda activate nimbus--data-ingest
 	
 1. Create large file called big_binary.MOV in current directory (should be > 8 MB)
 
@@ -43,10 +41,9 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 ## Running Code
 
 
-    conda activate nimbus--data-ingest
-    python process.py --aws --tsv sample.tsv 
+    python3 process.py --aws --tsv sample.small.tsv 
     or
-    python process.py --gs --tsv sample.tsv 
+    python3 process.py --gs --tsv sample.small.tsv 
    
 
 The output manifest file will be located at sample.manifest.tsv
@@ -54,13 +51,14 @@ The output manifest file will be located at sample.manifest.tsv
 ## Design Doc
 
 See [20200608 - Data Ingest Brainstorming](https://docs.google.com/document/d/1bZHUKZPL7Q7onKLSdR3YBrM7oeREC54yf1g_Dpc2yVI/edit) for design information.  
+
 ## Issues
 
 See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) for tracking issues.
 
 ## Input manifest file format
 
-The input manifest file is a TSV file with the following fields:
+The input manifest file is a TSV file with the following fields. See [sample.small.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.small.tsv) and [sample.cloud.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.cloud.tsv) for examples:
 
 * study\_id - required field
 * dbgap\_study\_id
