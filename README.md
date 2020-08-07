@@ -60,13 +60,19 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 The input manifest file is a TSV file with the following fields. See [sample.small.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.small.tsv) and [sample.cloud.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.cloud.tsv) for examples:
 
-* study\_id - required field
+* study\_id - required field, see naming restrictions below
 * dbgap\_study\_id
-* consent_group - required field
+* consent_group - required field, see naming restrictions below
 * study\_id
 * specimen\_id
 * experimental\_strategy
 * input\_file\_path - required field. Either the local file, s3:// path, or gs:// path to be transferred
+
+### Naming restrictions for study\_id and consent\_group
+* study\_id and consent\_group should consist of only lowercase letters and numbers. 
+* No special character are allowed, except for single hyphens (-). study\_id and consent\_group must not begin or end with a hyphen. 
+* The total number of characters for the study\_id and consent\_group combined shall not exceed 61 characters. 
+* The study\_id and consent\_group combination must be globally unique.
 
 ## Output manifest file format
 
