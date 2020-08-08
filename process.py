@@ -12,6 +12,7 @@ import csv
 import signal
 import sys
 import time
+import io
 import os
 from os import access, R_OK
 from os.path import isfile, basename
@@ -221,13 +222,15 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 			print("Already uploaded. Skipping", value['s3_path'])
 			continue 
 		if (value['input_file_path'].startswith('gs://')):			
-			p1 = subprocess.Popen(["gsutil", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)	
+			p1 = subprocess.Popen(["gsutil", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)
+			p1bytes = p1.stdout.read(-1)	
+			p1stream = io.BytesIO(p1bytes)	
 			# Do checksum for s3 file now
 			md5s = []
 			start = datetime.datetime.now()
 			print('start=', start)
 			while True:
-				data = p1.stdout.read(chunk_size)
+				data = p1stream.read(chunk_size)
 				if not data:
 					break
 				md5s.append(hashlib.md5(data))
@@ -259,7 +262,7 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 				if (value['input_file_path'].startswith("s3://")):
 					handle_aws_copy(value, bucket_name, s3_file)
 				elif (value['input_file_path'].startswith("gs://")):
-					handle_gs_to_s3_transfer(value, bucket_name, s3_file)
+					handle_gs_to_s3_transfer(p1bytes, value, bucket_name, s3_file)
 				else:	
 					handle_aws_file_upload(aws_client, transfer_config, value, bucket_name, s3_file)
 				response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
@@ -288,13 +291,9 @@ def handle_aws_copy(value, tobucket, tokey):
 	}
 	s3.meta.client.copy(copy_source, tobucket, tokey)
 
-def handle_gs_to_s3_transfer(value, tobucket, tokey):
-	p1 = subprocess.Popen(["gsutil", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)
-	p2 = subprocess.Popen(["aws", "s3", "cp", "-", 's3://%s/%s' % (tobucket, tokey)], stdin=p1.stdout)
-	p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-	print(p2.stdout)
-	output = p2.communicate()[0]
-	print(output)
+def handle_gs_to_s3_transfer(filebytes, value, tobucket, tokey):
+	p2 = subprocess.run(["aws", "s3", "cp", "-", 's3://%s/%s' % (tobucket, tokey)], input=filebytes)
+	print(p2.returncode)
 
 def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 	if (bucket_name in aws_buckets):
@@ -507,13 +506,14 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 			print("Already uploaded. Skipping", value['gs_path'])
 			continue
 
-		p1 = ''
+		p1bytes = ''
 		if (value['input_file_path'].startswith('s3://')):			
-			p1 = subprocess.Popen(["aws", "s3", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)	
+			p1 = subprocess.Popen(["aws", "s3", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)
+			p1bytes = p1.stdout.read(-1)	
 			# Do checksum for s3 file now
 			start = datetime.datetime.now()			
 			crc32c = crcmod.predefined.Crc('crc-32c')
-			crc32c.update(p1.stdout.read(-1))
+			crc32c.update(p1bytes)
 			end = datetime.datetime.now()
 			base64_value = base64.b64encode(crc32c.digest()).decode('utf-8')
 			print('elapsed time for checksum:', crc32c.crcValue, base64_value, end - start)
@@ -539,12 +539,8 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 				# Note that gsutil automatically handles resumable transfers
 				# https://cloud.google.com/storage/docs/gsutil/addlhelp/ScriptingProductionTransfers
 				if (value['input_file_path'].startswith('s3://')):
-					p1 = subprocess.Popen(["aws", "s3", "cp", value['input_file_path'], "-"], stdout=subprocess.PIPE)					
-					p2 = subprocess.Popen(["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-", 'gs://%s/%s' % (bucket_name, blob.name)], stdin=p1.stdout)
-					p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-#					print(p2.stdout)
-					output = p2.communicate()[0]
-#					print(output)
+					p2 = subprocess.run(["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-", 'gs://%s/%s' % (bucket_name, blob.name)], input=p1bytes)
+					print(p2.returncode)
 				else:
 					subprocess.check_call([
 						'gsutil',
@@ -565,27 +561,6 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 				value['gs_modified_date'] = ''
 				value['gs_file_size'] = ''				
 		update_manifest_file(out_file, od)	
-
-def handle_s3_to_gs_transfer(s3_path, gs_bucket_name, gs_blob):
-	global gs_crc32c
-	p1 = subprocess.Popen(["aws", "s3", "cp", s3_path, "-"], stdout=subprocess.PIPE)
-	
-	# Do checksum
-	start = datetime.datetime.now()			
-	crc32c = crcmod.predefined.Crc('crc-32c')
-	crc32c.update(p1.stdout)
-	end = datetime.datetime.now()
-	base64_value = base64.b64encode(crc32c.digest()).decode('utf-8')
-	print('elapsed time for checksum:', crc32c.crcValue, base64_value, end - start)
-	value['gs_crc32c'] = base64_value
-	gs_crc32c[value['input_file_path']] = format(crc32c.crcValue)
-	update_manifest_file(out_file, od)
-		
-	p2b = subprocess.Popen(["gsutil", "-o", "GSUtil:parallel_composite_upload_threshold=150M", "cp", "-", 'gs://%s/%s' % (bucket_name, blob.name)], stdin=p1.stdout)
-	p1.stdout.close()  # Allow p1 to receive a SIGPIPE if p2 exits.
-	print(p2b.stdout)
-	output = p2b.communicate()[0]
-	print(output)
 
 def add_gs_manifest_metadata(fields, blob, gs_path): 
 		fields['gs_path'] = gs_path
