@@ -63,6 +63,8 @@ import crcmod
 out_file_path = ''
 out_file = ''
 gs_crc32c = {}
+gs_buckets = {}
+aws_buckets = {}
 
 # 1. Read and Verify Input Manifest File
 # 2. If --gs is set, then perform google checksums and upload to Google Cloud
@@ -93,7 +95,7 @@ def main():
 		update_manifest_file(out_file, od)
 				
 	out_file.close()
-	# FIXME upload receipt manifest to each bucket updated
+	upload_manifest_file(out_file, args.gs, args.aws)
 	print("Done. Receipt manifest located at", out_file_path)
 
 # Generate name for receipt manifest file by replacing ".tsv" in input manifest file with
@@ -111,6 +113,26 @@ def get_receipt_manifest_file_pointer(input_manifest_file_path):
 	out_file_path = manifest_filepath
 	f = open(manifest_filepath, 'wt')
 	return f		
+
+# upload receipt manifest file to each cloud bucket that had content uploaded
+
+def upload_manifest_file(receipt_manifest_file, gs_upload, aws_upload):
+	if (gs_upload):
+		storage_client = storage.Client()
+		for key, value in gs_buckets.items():
+			print("Uploading ", receipt_manifest_file.name, " to gs://", key, sep='')
+			bucket = storage_client.bucket(key)
+			blob = bucket.blob(basename(receipt_manifest_file.name))
+			blob.upload_from_filename(receipt_manifest_file.name)
+
+				
+	if (aws_upload):
+		aws_client = boto3.client('s3')
+		for key, value in aws_buckets.items():
+			print("Uploading ", receipt_manifest_file.name, " to s3://", key, sep='')
+			aws_client.upload_file(receipt_manifest_file.name, key, basename(receipt_manifest_file.name))
+	
+
 
 # Parse user arguments and confirm valid arguments.
 
@@ -229,7 +251,7 @@ def verify_s3_file(value, local_file, test_mode):
 # Confirm all Google Storage buckets writeable by the user
     	   
 def verify_gs_buckets(od, test_mode):
-	gs_buckets = {}
+	global gs_buckets
 	storage_client = storage.Client()
 
 	all_buckets_writeable = True
@@ -243,7 +265,7 @@ def verify_gs_buckets(od, test_mode):
 # Confirm all AWS writeable by the user
 		
 def verify_aws_buckets(od, test_mode):
-	aws_buckets = {}
+	global aws_buckets
 	iam = boto3.client('iam')
 	sts = boto3.client('sts')
 	arn = sts.get_caller_identity()['Arn']
