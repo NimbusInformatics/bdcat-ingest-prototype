@@ -36,17 +36,17 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 2. Run `aws configure` / set up google cloud credentials
 
-3. For testing, update study\_id fields in sample.tsv. Then create aws/gs s3 buckets with the name `<study_id>-<consent_code>`
+3. For testing, update study\_id fields in sample.tsv. Then create aws/gs s3 buckets with the name `<study_id>--<consent_code>`
 
 ## Running Code
 
 
-    python3 process.py --aws --tsv sample.small.tsv 
+    python3 process.py --aws --tsv sample.multifile.tsv 
     or
-    python3 process.py --gs --tsv sample.small.tsv 
+    python3 process.py --gs --tsv sample.multifile.tsv 
    
 
-The output manifest file will be located at sample.manifest.tsv
+The output manifest file will be located at sample.mulifile.<timestamp>manifest.tsv
 
 ## Design Doc
 
@@ -58,7 +58,7 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 ## Input manifest file format
 
-The input manifest file is a TSV file with the following fields. See [sample.small.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.small.tsv) and [sample.cloud.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.cloud.tsv) for examples:
+The input manifest file is a TSV file with the following fields. See [sample.multifile.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.multifile.tsv) for examples:
 
 * study\_id - required field, see naming restrictions below
 * dbgap\_study\_id
