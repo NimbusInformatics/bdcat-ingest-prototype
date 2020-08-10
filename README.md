@@ -4,6 +4,11 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 ## Setup Instructions for Ubuntu 20.04 LTS
 
+In version 1.0, files on cloud services are downloaded before having their checksum 
+calculated and uploaded. Please ensure that your VM has enough disk storage space for 
+the largest file in your manifest file.
+
+
     sudo apt update
     sudo apt -y install python3-pip awscli gcc python-dev python-setuptools libffi-dev
 
