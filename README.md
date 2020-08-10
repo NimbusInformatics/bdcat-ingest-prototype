@@ -90,6 +90,7 @@ The output manifest file is a TSV file with the following fields:
 * specimen\_id
 * experimental\_strategy
 * input\_file\_path
+* drs\_id - unique identifier for resource based on standards listed at [https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.1.0/docs/#_drs_uris] (https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.1.0/docs/#_drs_uris)
 * md5sum
 * gs\_gs_crc32c - checksum provided by google storage in base64 format. Note that all gs\* fields will be empty if google storage was not selected
 * gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique. It is not using the base64 format, which might lead to illegal key names, but instead the unsigned 32-bit integer value
