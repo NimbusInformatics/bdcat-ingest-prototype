@@ -23,7 +23,6 @@
 # --chunk-size CHUNK_SIZE
 #                        mulipart-chunk-size for uploading (default: 8 * 1024 * 1024)
 
-
 import argparse
 import subprocess
 import datetime
@@ -36,6 +35,7 @@ import time
 import io
 import os
 import tempfile
+import uuid
 from os import access, R_OK
 from os.path import isfile, basename
 from collections import OrderedDict 
@@ -106,7 +106,7 @@ def get_receipt_manifest_file_pointer(input_manifest_file_path):
 	timestr = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
 	
 	if (manifest_filepath.endswith('.tsv')):
-		manifest_filepath = manifest_filepath.replace(".tsv", "." + timestr + ".manifest.tsv")	
+		manifest_filepath = manifest_filepath.replace(".tsv", ".manifest." + timestr + ".tsv")	
 	else:
 		manifest_filepath += '.manifest.tsv'
 	global out_file_path
@@ -186,6 +186,7 @@ def process_row(od, row, test_mode, resume_mode):
 	# Add blank fields to ensure that they will appear in the correct order for the
 	# receipt manifest file
 	if (not resume_mode):
+		row['drs_uri'] = ''
 		row['md5sum'] = ''
 		row['gs_crc32c'] = ''
 		row['gs_path'] = ''
@@ -233,7 +234,7 @@ def verify_gs_file(value, local_file, test_mode):
 		print('Not found:', local_file)
 		return False
 
-# Confirm file on AWS, and include add its checksum information
+# Confirm file on AWS, and include its checksum information
        
 def verify_s3_file(value, local_file, test_mode):
 	obj = urlparse(local_file, allow_fragments=False)
@@ -305,6 +306,7 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 	tmpfilepath = ''
 	for key, value in od.items():
 		if (resume_mode and 's3_path' in value.keys() and value['s3_path'].startswith('s3://')):
+			add_drs_uri_from_path(value, value['s3_path'])
 			print("Already uploaded. Skipping", value['s3_path'])
 			continue 
 		try: 
@@ -316,14 +318,14 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 				calculate_s3_md5sum(tmpfilepath, value, chunk_size, od, out_file, resume_mode)
 
 			bucket_name = get_bucket_name(value)
-			s3_file = value['s3_md5sum'] + '/' + basename(value['input_file_path'])
-			print('Attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
-		
-			if (aws_key_exists(bucket_name, s3_file)):
-				print("Already exists. Skipping ", 's3://', bucket_name, '/', s3_file, sep='')
-				response = aws_client.head_object(Bucket=bucket_name, Key=s3_file)
-				add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + s3_file)
+			if (path_in_aws_bucket(bucket_name, value['s3_md5sum'], value)):
+				print("Already exists. Skipping", value['s3_path'])
 			else:
+				add_new_drs_uri(value)
+				drs_uri_in_path = value['drs_uri'].replace("drs://dg.4503:", "")
+				s3_file = value['s3_md5sum'] + '/' + drs_uri_in_path + '/' + basename(value['input_file_path'])
+				print('Attempting to upload ', s3_file, ' to s3://', bucket_name, ' with threads=', threads, ' and chunk_size=', chunk_size, sep='')
+	# fix me add logic to find file		
 				if (value['input_file_path'].startswith("s3://")):
 					handle_aws_copy(value, bucket_name, s3_file)
 				elif (value['input_file_path'].startswith("gs://")):
@@ -349,7 +351,7 @@ def handle_aws_file_upload(aws_client, transfer_config, from_file, bucket_name, 
 	start = datetime.datetime.now()
 	aws_client.upload_file(from_file, bucket_name, s3_file, Config=transfer_config)
 	end = datetime.datetime.now()
-	print('elapsed time for aws upload:', end - start)
+	print('Elapsed time for aws upload:', end - start)
 
 
 # Copy s3 -> s3
@@ -439,6 +441,20 @@ def gs_bucket_writeable(bucket_name, storage_client, gs_buckets, test_mode):
 			gs_buckets[bucket_name] = 0
 			return False			
 
+def path_in_aws_bucket(bucket_name, path, value):
+	s3 = boto3.resource('s3')
+	bucket = s3.Bucket(bucket_name)
+	objs = list(bucket.objects.filter(Prefix=path))
+	if (len(objs) > 0):
+		aws_client = boto3.client('s3')
+		response = aws_client.head_object(Bucket=bucket_name, Key=objs[0].key)
+		add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + objs[0].key)	
+		return True
+	else:
+		return False
+
+
+
 def aws_key_exists(bucket_name, key):
 	s3 = boto3.resource('s3')
 	bucket = s3.Bucket(bucket_name)
@@ -447,6 +463,20 @@ def aws_key_exists(bucket_name, key):
 		return True
 	else:
 		return False
+
+# Given a path prefix, look for that path prefix in the given bucket name. This is used
+# to find a file with a matching md5sum in the bucket, presuming that it is an identical
+# file that has already been uploaded
+
+def path_in_gs_bucket(bucket_name, path, value):
+	match_found = False
+	client = storage.Client()
+	for blob in client.list_blobs(bucket_name, prefix=path):
+		blob.reload()
+		add_gs_manifest_metadata(value, blob, "gs://" + bucket_name + "/" + blob.name, value['input_file_path'])
+		match_found = True
+	return match_found
+
 
 def gs_blob_exists(value, bucket_name, key):
 	storage_client = storage.Client()
@@ -497,6 +527,8 @@ def add_aws_manifest_metadata(fields, response, path):
 	if (len(fields['md5sum']) == 0):
 		md5sum = calculate_md5sum(fields['input_file_path'])
 		fields['md5sum'] = md5sum
+	if (not fields['drs_uri'].startswith("drs://")):
+		add_drs_uri_from_path(fields, path)
 
 def add_blank_aws_manifest_metadata(od):
 	for key, value in od.items():
@@ -604,6 +636,7 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 	for key, value in od.items():
 		if (resume_mode and 'gs_path' in value.keys() and value['gs_path'].startswith('gs://')):
 			print("Already uploaded. Skipping", value['gs_path'])
+			add_drs_uri_from_path(value, value['s3_path'])
 			continue
 		try:
 			input_file_path = value['input_file_path']
@@ -616,16 +649,17 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 				input_file_path = tmpfilepath
 				 
 			bucket_name = get_bucket_name(value)
-			file = basename(value['input_file_path'])
-			bucket = storage_client.bucket(bucket_name)
-			blob = bucket.blob(gs_crc32c[value['input_file_path']]+ '/' + file)
-			gs_path = 'gs://' + bucket_name + '/' + blob.name			
-			print('Attempting to upload ' + input_file_path + ' to ' + gs_path)
-			if (blob.exists()):
-				blob.reload()
-				add_gs_manifest_metadata(value, blob, gs_path, input_file_path)
-				print("Already exists. Skipping ", 'gs://', bucket_name, '/', blob.name, sep='')
+			if (path_in_gs_bucket(bucket_name, gs_crc32c[value['input_file_path']], value)):
+				print("Already exists. Skipping", value['gs_path'])
 			else:
+				file = basename(value['input_file_path'])
+				bucket = storage_client.bucket(bucket_name)
+				add_new_drs_uri(value)
+				drs_uri_in_path = value['drs_uri'].replace("drs://dg.4503:", "")
+				blob = bucket.blob(gs_crc32c[value['input_file_path']]+ '/' + drs_uri_in_path + '/' + file)
+				gs_path = 'gs://' + bucket_name + '/' + blob.name			
+				print('Attempting to upload ' + input_file_path + ' to ' + gs_path)
+
 				start = datetime.datetime.now()
 				# Note that gsutil automatically handles resumable transfers
 				# https://cloud.google.com/storage/docs/gsutil/addlhelp/ScriptingProductionTransfers
@@ -635,7 +669,7 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 					'cp', input_file_path, 'gs://%s/%s' % (bucket_name, blob.name)
 				])				
 				end = datetime.datetime.now()
-				print('elapsed time for gs upload:', end - start)
+				print('Elapsed time for gs upload:', end - start)
 				blob = bucket.get_blob(blob.name)
 				if (value['gs_crc32c'] == blob.crc32c):
 					print('crc32c matches:', blob.crc32c)
@@ -657,7 +691,7 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 # Given the blob object from Google Cloud, adds data into the ordered dictionary that will
 # be output by the receipt manifest file
 
-def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path): 
+def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path):
 		fields['gs_path'] = gs_path
 		fields['gs_modified_date'] = format(blob.updated)
 		fields['gs_file_size'] = blob.size
@@ -667,6 +701,8 @@ def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path):
 			else:
 				md5sum = calculate_md5sum(input_file_path)
 				fields['md5sum'] = md5sum
+		if (not fields['drs_uri'].startswith("drs://")):
+			add_drs_uri_from_path(fields, gs_path)
 
 # Calculate md5sum for the path, including downloading the file if it is a cloud resource.
 
@@ -715,8 +751,21 @@ def add_blank_gs_manifest_metadata(od):
 def get_bucket_name(row):
 	return row['study_id'] + '--' + row['consent_group']
 
+def get_drs_uri():
+	x = uuid.uuid4()
+	return "drs://dg.4503:" + str(x)
+
+def add_drs_uri_from_path(value, path):
+	if (not value['drs_uri'].startswith('drs://')):
+		segments = path.split('/')
+		value['drs_uri'] = "drs://dg.4503:" + segments[4]
+
+def add_new_drs_uri(value):
+	if (not value['drs_uri'].startswith('drs://')):
+		value['drs_uri'] = get_drs_uri()
+	
 # This method gets called after each checksum and upload so that as much state as possible
-# is written out to the receipt manifes file.
+# is written out to the receipt manifest file.
 
 def update_manifest_file(f, od):
 	with threading.Lock():
