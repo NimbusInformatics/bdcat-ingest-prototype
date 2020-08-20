@@ -40,6 +40,7 @@ from os import access, R_OK
 from os.path import isfile, basename
 from collections import OrderedDict 
 from urllib.parse import urlparse
+from gcs_object_stream_upload import GCSObjectStreamUpload
 
 import threading
 import concurrent.futures
@@ -84,11 +85,11 @@ def main():
 
 	if (args.gs):
 		calculate_gs_checksums(od, args.threads, out_file, args.resume)
-		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, args.resume)
+#		upload_to_gcloud(od, out_file, args.threads, args.chunk_size, args.resume)
 
 	if (args.aws):
 		calculate_aws_checksums(od, args.threads, args.chunk_size, out_file, args.resume)
-		upload_to_aws(od, out_file, args.threads, args.chunk_size, args.resume)
+#		upload_to_aws(od, out_file, args.threads, args.chunk_size, args.resume)
 
 	# do one last refresh in case the resume file was actually complete
 	if (args.resume):
@@ -293,7 +294,7 @@ def calculate_aws_checksums(od, num_threads, chunk_size, out_file, resume_mode):
 			except ValueError as e:
 				print(e)
 	end = datetime.datetime.now()
-#	print('elapsed time for aws checksums:', end - start)
+	print('Elapsed time for aws checksums:', end - start)
 
 # Determines upload type based in input_file_path and uploads to AWS
  
@@ -301,23 +302,20 @@ def upload_to_aws(od, out_file, threads, chunk_size, resume_mode):
 	aws_client = boto3.client('s3')
 	transfer_config = boto3.s3.transfer.TransferConfig(multipart_chunksize=chunk_size, max_concurrency=threads, use_threads=True)  
 
-
-	tmpfilepointer = ''
-	tmpfilepath = ''
 	for key, value in od.items():
 		if (resume_mode and 's3_path' in value.keys() and value['s3_path'].startswith('s3://')):
 			add_drs_uri_from_path(value, value['s3_path'])
 			print("Already uploaded. Skipping", value['s3_path'])
 			continue 
-		try: 
-			if (value['input_file_path'].startswith('gs://')):
-				# download the file to a temporary location
-				(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
-				obj = urlparse(value['input_file_path'], allow_fragments=False)			
-				download_gs_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
-				calculate_s3_md5sum(tmpfilepath, value, chunk_size, od, out_file, resume_mode)
-
+		try:
+			temp_gs_file_key = ''
 			bucket_name = get_bucket_name(value)
+	 
+			if (value['input_file_path'].startswith('gs://')):
+				obj = urlparse(value['input_file_path'], allow_fragments=False)			
+				temp_gs_file_key = 'tmp' + obj.path
+				handle_gcloud_to_s3_transfer(storage_client, value, bucket, temp_gs_file_key)
+
 			if (path_in_aws_bucket(bucket_name, value['s3_md5sum'], value)):
 				print("Already exists. Skipping", value['s3_path'])
 			else:
@@ -595,7 +593,7 @@ def calculate_gs_checksums(od, num_threads, out_file, resume_mode):
 			except ValueError as e:
 				print(e)
 	end = datetime.datetime.now()
-#	print('elapsed time for gs checksums:', end - start)
+	print('Elapsed time for gs checksums:', end - start)
 
 # Calculates crc32c value
 
@@ -612,7 +610,8 @@ def calculate_gs_checksum(input_file_path, value, od, out_file, resume_mode):
 		gs_crc32c[value['input_file_path']] = unsigned_int
 		print('gs_crc32c already calculated for', value['input_file_path'], unsigned_int)
 		return
-		
+
+	# FIXME - chunk instead of read entire file		
 	start = datetime.datetime.now()			
 	file_bytes = open(input_file_path, 'rb').read()
 	crc32c = crcmod.predefined.Crc('crc-32c')
@@ -630,46 +629,52 @@ def calculate_gs_checksum(input_file_path, value, od, out_file, resume_mode):
 def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):    
 	storage_client = storage.Client()
 
-	tmpfilepointer = ''
-	tmpfilepath = ''
-	
 	for key, value in od.items():
 		if (resume_mode and 'gs_path' in value.keys() and value['gs_path'].startswith('gs://')):
 			print("Already uploaded. Skipping", value['gs_path'])
 			add_drs_uri_from_path(value, value['s3_path'])
 			continue
 		try:
+			temp_gs_file_key = ''
+			temp_blob = ''
 			input_file_path = value['input_file_path']
-			if (value['input_file_path'].startswith('s3://')):			
-				# download the file to a temporary location
-				(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
-				obj = urlparse(value['input_file_path'], allow_fragments=False)			
-				download_aws_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
-				calculate_gs_checksum(tmpfilepath, value, od, out_file, resume_mode)
-				input_file_path = tmpfilepath
-				 
 			bucket_name = get_bucket_name(value)
+			bucket = storage_client.bucket(bucket_name)
+			
+			if (value['input_file_path'].startswith('s3://')):			
+				obj = urlparse(value['input_file_path'], allow_fragments=False)			
+				temp_gs_file_key = 'tmp' + obj.path
+				temp_blob = handle_s3_to_gcloud_transfer(storage_client, value, bucket, temp_gs_file_key)
+				
 			if (path_in_gs_bucket(bucket_name, gs_crc32c[value['input_file_path']], value)):
-				print("Already exists. Skipping", value['gs_path'])
+				print("Already exists. Skipping", value['gs_path'])				
 			else:
 				file = basename(value['input_file_path'])
-				bucket = storage_client.bucket(bucket_name)
 				add_new_drs_uri(value)
 				drs_uri_in_path = value['drs_uri'].replace("drs://dg.4503:", "")
 				blob = bucket.blob(gs_crc32c[value['input_file_path']]+ '/' + drs_uri_in_path + '/' + file)
 				gs_path = 'gs://' + bucket_name + '/' + blob.name			
 				print('Attempting to upload ' + input_file_path + ' to ' + gs_path)
 
-				start = datetime.datetime.now()
-				# Note that gsutil automatically handles resumable transfers
-				# https://cloud.google.com/storage/docs/gsutil/addlhelp/ScriptingProductionTransfers
-				subprocess.check_call([
-					'gsutil',
-					'-o', 'GSUtil:parallel_composite_upload_threshold=%s' % ('150M'),
-					'cp', input_file_path, 'gs://%s/%s' % (bucket_name, blob.name)
-				])				
-				end = datetime.datetime.now()
-				print('Elapsed time for gs upload:', end - start)
+				if (value['input_file_path'].startswith('s3://')):		
+					temp_blob = bucket.blob(temp_gs_file_key)
+					if (temp_blob.exists()):
+						bucket.rename_blob(temp_blob, gs_crc32c[value['input_file_path']]+ '/' + drs_uri_in_path + '/' + file)
+					else:
+						print("Error: s3://", bucket_name, temp_gs_file_key, " does not exist", sep='')
+						temp_blob = ''
+						continue
+				else:
+					start = datetime.datetime.now()
+					# Note that gsutil automatically handles resumable transfers
+					# https://cloud.google.com/storage/docs/gsutil/addlhelp/ScriptingProductionTransfers
+					subprocess.check_call([
+						'gsutil',
+						'-o', 'GSUtil:parallel_composite_upload_threshold=%s' % ('150M'),
+						'cp', input_file_path, 'gs://%s/%s' % (bucket_name, blob.name)
+					])				
+					end = datetime.datetime.now()
+					print('Elapsed time for gs upload:', end - start)
 				blob = bucket.get_blob(blob.name)
 				if (value['gs_crc32c'] == blob.crc32c):
 					print('crc32c matches:', blob.crc32c)
@@ -682,11 +687,90 @@ def upload_to_gcloud(od,  manifest_filepath, threads, chunk_size, resume_mode):
 			value['gs_modified_date'] = ''
 			value['gs_file_size'] = ''				
 		finally:
-			if (tmpfilepath):
-				# remove temp file
-				os.remove(tmpfilepath)
-				tmpfilepath = ''			
+#			if (temp_blob and temp_blob.exists()):
+#				temp_blob.delete()				
+			temp_gs_file_key = ''
+			
 		update_manifest_file(out_file, od)	
+
+#https://stackoverflow.com/questions/3910071/check-file-size-on-s3-without-downloading/12678543
+#https://docs.aws.amazon.com/cli/latest/reference/s3api/head-object.html
+def get_s3_file_size(s3_path):
+	obj = urlparse(s3_path, allow_fragments=False)
+	aws_client = boto3.client('s3')
+	response = aws_client.head_object(Bucket=obj.netloc, Key=obj.path.lstrip('/'))
+	return response['ContentLength']
+
+#https://github.com/googleapis/google-cloud-python/blob/db481bfdd6816d020d99df0d4caa307358ab1141/storage/google/cloud/storage/blob.py#L1537
+#https://github.com/googleapis/google-cloud-python/blob/db481bfdd6816d020d99df0d4caa307358ab1141/storage/tests/system.py#L1011
+def handle_s3_to_gcloud_transfer(storage_client, value, bucket, key):
+	current_pointer = 0
+	buffer_size = 150 * 1024 * 1024
+	end_pointer = current_pointer + buffer_size - 1
+	
+	# get s3 size and streaming object
+	obj = urlparse(value['input_file_path'], allow_fragments=False)
+	s3 = boto3.client('s3')
+	s3_file_size = s3.head_object(Bucket=obj.netloc, Key=obj.path.lstrip('/'))['ContentLength']	
+	if (end_pointer > s3_file_size - 1):
+		end_pointer = s3_file_size - 1
+	s3_object = s3.get_object(Bucket=obj.netloc, Key=obj.path.lstrip('/'), Range='bytes={}-{}'.format(current_pointer, end_pointer))
+
+	# Do checksum for s3 file now
+	crc32c = crcmod.predefined.Crc('crc-32c')
+	start = datetime.datetime.now()			
+
+	s3_stream = s3_object["Body"]
+	buffer = s3_stream.read() 
+	blob = ''
+
+	if (s3_file_size <= buffer_size):
+		print("Uploading ", value['input_file_path'], " in 1 shard to ", "gs://", bucket.name, "/", key, "bytes ", current_pointer, "-", end_pointer, sep = '')
+		shard = bucket.blob(key)
+		shard.chunk_size = 8 * 1024 * 1024 # Set 5 MB blob size to prevent timeouts with slower connection
+		shard.upload_from_string(data=buffer, content_type='application/octet-stream', client=storage_client)
+		sys.stdout.flush()	
+		crc32c.update(buffer)
+		blob = shard
+		value['md5sum'] = blob.md5_hash		
+	else:
+		counter = 0 
+		blobs_to_compose = []
+		m = hashlib.md5()
+		gcs_stream = GCSObjectStreamUpload(client=storage_client, bucket_name=bucket.name, blob_name=key, chunk_size=8*1024*1024)
+		gcs_stream.start()         
+		while (current_pointer < s3_file_size):
+			crc32c.update(buffer)
+			m.update(buffer)
+			print("Uploading ", value['input_file_path'], " shard ", counter, " to ", "gs://", bucket.name, "/", key, "bytes ", current_pointer, "-", end_pointer, sep='')
+			sys.stdout.flush()
+			gcs_stream.write(buffer)
+			current_pointer = current_pointer + buffer_size
+			end_pointer = end_pointer + buffer_size
+			if (end_pointer > s3_file_size - 1):
+				end_pointer = s3_file_size - 1
+			if (current_pointer <= s3_file_size - 1):
+				s3_object = s3.get_object(Bucket=obj.netloc, Key=obj.path.lstrip('/'), Range='bytes={}-{}'.format(current_pointer, end_pointer))
+				s3_stream = s3_object["Body"]				
+				buffer = s3_stream.read() 
+				counter = counter + 1
+		blob = bucket.blob(key)	
+		value['md5sum'] = m.hexdigest()
+		gcs_stream.stop()  
+
+	end = datetime.datetime.now()	
+	base64_value = base64.b64encode(crc32c.digest()).decode('utf-8')
+	print('elapsed time for s3 to gcloud:', crc32c.crcValue, base64_value, end - start)
+	value['gs_crc32c'] = base64_value
+	gs_crc32c[value['input_file_path']] = format(crc32c.crcValue)
+	print("calculated crc32c value", format(crc32c.crcValue))
+	s3_stream.close()  
+	return blob
+
+# https://medium.com/@niyazi_erd/aws-s3-multipart-upload-with-python-and-boto3-9d2a0ef9b085
+def handle_gcloud_to_s3_transfer(value, bucket, key):
+	#fixme https://gist.github.com/gamame/2237612
+	return
 
 # Given the blob object from Google Cloud, adds data into the ordered dictionary that will
 # be output by the receipt manifest file
@@ -716,7 +800,7 @@ def calculate_md5sum(input_file_path):
 			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
 			obj = urlparse(input_file_path, allow_fragments=False)
 			local_file = tmpfilepath
-			
+#fixme can't download file			
 			if(local_file.startswith("gs://")):						
 				download_gs_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
 			elif(local_file.startswith("s3://")):

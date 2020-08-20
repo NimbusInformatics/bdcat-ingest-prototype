@@ -66,9 +66,8 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 The input manifest file is a TSV file with the following fields. See [sample.multifile.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.multifile.tsv) for examples:
 
 * study\_id - required field, see naming restrictions below
-* dbgap\_study\_id
 * consent_group - required field, see naming restrictions below
-* study\_id
+* participant\_id
 * specimen\_id
 * experimental\_strategy
 * input\_file\_path - required field. Either the local file, s3:// path, or gs:// path to be transferred
@@ -84,9 +83,8 @@ The input manifest file is a TSV file with the following fields. See [sample.mul
 The output manifest file is a TSV file with the following fields:
 
 * study\_id
-* dbgap\_study\_id
 * consent_group
-* study\_id
+* participant\_id
 * specimen\_id
 * experimental\_strategy
 * input\_file\_path
