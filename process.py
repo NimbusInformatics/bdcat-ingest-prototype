@@ -827,7 +827,7 @@ def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path):
 		fields['gs_path'] = gs_path
 		fields['gs_modified_date'] = format(blob.updated)
 		fields['gs_file_size'] = blob.size
-		if ('md5sum' not in fields):
+		if (len(fields['md5sum']) == 0):
 			if (blob.md5_hash):
 				fields['md5sum'] =  base64.b64decode(blob.md5_hash).hex()
 			else:
@@ -848,7 +848,7 @@ def calculate_md5sum(input_file_path):
 			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
 			obj = urlparse(input_file_path, allow_fragments=False)
 			local_file = tmpfilepath
-#fixme can't download file			
+#fixme stream file instead		
 			if(local_file.startswith("gs://")):						
 				download_gs_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
 			elif(local_file.startswith("s3://")):
