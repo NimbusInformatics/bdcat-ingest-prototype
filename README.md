@@ -4,11 +4,6 @@ Repo for experimenting with data preparation and upload for the BDCat project.
 
 ## Setup Instructions for Ubuntu 20.04 LTS
 
-In version 1.0, files on cloud services are downloaded before having their checksum 
-calculated and uploaded. Please ensure that your VM has enough disk storage space for 
-the largest file in your manifest file.
-
-
     sudo apt update
     sudo apt -y install python3-pip awscli gcc python-dev python-setuptools libffi-dev
 
@@ -20,8 +15,12 @@ the largest file in your manifest file.
     echo export PATH=${PATH}:$HOME/gsutil >> ~/.bashrc
 
     # load credentials for google cloud, if necessary
-    export GOOGLE_APPLICATION_CREDENTIALS="<path to credentials .json file>"
-    gsutil config
+	gcloud config set pass_credentials_to_gsutil false
+	gsutil config
+	find .config | grep json 
+	# use that path for your GOOGLE_APPLICATION_CREDENTIALS, for example, 
+	# export GOOGLE_APPLICATION_CREDENTIALS=/home/boconnor/./.config/gcloud/legacy_credentials/boconnor@nimbusinformatics.com/adc.json
+	export GCLOUD_PROJECT=<your project name>
 
     # load credentials for aws, if necesary
     aws configure
