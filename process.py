@@ -417,17 +417,17 @@ def gs_bucket_writeable(bucket_name, storage_client, gs_buckets, test_mode):
 			return False
 	else:
 		try:
-			bucket = storage_client.get_bucket(bucket_name)
-			if (bucket.exists()):
-				returnedPermissions = bucket.test_iam_permissions('storage.objects.create')
+			bucket = storage_client.bucket(bucket_name)
+#			if (bucket.exists()):
+			returnedPermissions = bucket.test_iam_permissions('storage.objects.create')
 #				print('PERMISSIONS for', bucket_name, returnedPermissions)
-				if ('storage.objects.create' in returnedPermissions):
-					gs_buckets[bucket_name] = 1
-					return True
-				else:
-					print('ERROR: gs bucket is not writeable', bucket_name)
-					gs_buckets[bucket_name] = 0
-					return False					
+			if ('storage.objects.create' in returnedPermissions):
+				gs_buckets[bucket_name] = 1
+				return True
+			else:
+				print('ERROR: gs bucket is not writeable', bucket_name)
+				gs_buckets[bucket_name] = 0
+				return False					
 		except BadRequest as e:
 			gs_buckets[bucket_name] = 0
 			print('ERROR: gs bucket does not exist -', bucket_name, e)
