@@ -64,16 +64,21 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 The input manifest file is a TSV file with the following fields. See [sample.multifile.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.multifile.tsv) for examples:
 
-* study\_id - required field, see naming restrictions below
-* consent_group - required field, see naming restrictions below
-* participant\_id
-* specimen\_id
-* experimental\_strategy
+Please see [NIH Interop - Common Attributes](https://docs.google.com/spreadsheets/d/1MxfcWDXhTfFNFKsbRGjGTQkBoTirNktj04lf6L9_jmk/edit#gid=0) for more details about some of the fields.
+
+* study\_registration - External source from which the identifier included in study\_id originates
+* study\_id - required field, see naming restrictions below. Unique identifier that can be used to retrieve more information for a study
+* consent_group - required field, see naming restrictions below. 
+* participant\_id - Unique identifier that can be used to retrieve more information for a participant
+* specimen\_id - Unique identifier that can be used to retrieve more information for a specimen
+* experimental\_strategy - The experimental strategy used to generate the data file referred to by the ga4gh_drs_uri. (Based on GDC definition)
 * input\_file\_path - required field. Either the local file, s3:// path, or gs:// path to be transferred
+* file\_format - The format of the data, see possible values from the data_format fields in GDC.  Can use whatever values make sense for the particular implementation.
+* file\_type - The type of the data, see possible values from the data_type fields in GDC.  Can use whatever values make sense for the particular implementation.
 
 ### Naming restrictions for study\_id and consent\_group
 * study\_id and consent\_group should consist of only lowercase letters and numbers. 
-* No special character are allowed, except for single hyphens (-). study\_id and consent\_group must not begin or end with a hyphen. 
+* No special character are allowed, except for single periods (.). study\_id and consent\_group must not begin or end with a period. 
 * The total number of characters for the study\_id and consent\_group combined shall not exceed 61 characters. 
 * The study\_id and consent\_group combination must be globally unique.
 
@@ -81,13 +86,17 @@ The input manifest file is a TSV file with the following fields. See [sample.mul
 
 The output manifest file is a TSV file with the following fields:
 
+* study\_registration
 * study\_id
 * consent_group
 * participant\_id
 * specimen\_id
 * experimental\_strategy
 * input\_file\_path
-* drs\_uri - unique identifier for resource based on standards listed at https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.1.0/docs/#_drs_uris
+* file\_format
+* file\_type
+* file\_name
+* ga4gh\_drs\_uri - unique identifier for resource based on standards listed at https://ga4gh.github.io/data-repository-service-schemas/preview/release/drs-1.1.0/docs/#_drs_uris
 * md5sum
 * gs\_gs_crc32c - checksum provided by google storage in base64 format. Note that all gs\* fields will be empty if google storage was not selected
 * gs\_path - path to google storage file. Note that the path includes the checksum to ensure that files are unique. It is not using the base64 format, which might lead to illegal key names, but instead the unsigned 32-bit integer value
