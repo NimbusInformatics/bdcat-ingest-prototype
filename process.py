@@ -74,7 +74,7 @@ aws_buckets = {}
 
 def main():
 	args = parse_args()
-	print('Script running on', sys.platform, 'with', os.cpu_count(), 'cpus')
+	print('Script running version 1.3 on', sys.platform, 'with', os.cpu_count(), 'cpus')
 
 	# process file
 	od = OrderedDict()
