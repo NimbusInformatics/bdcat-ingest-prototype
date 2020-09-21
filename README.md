@@ -62,7 +62,7 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 ## Input manifest file format
 
-The input manifest file is a TSV file with the following fields. See [sample.multifile.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.multifile.tsv) for examples:
+The input manifest file is a TSV file with the following fields. See [sample.cloud.long.tsv](sample.cloud.long.tsv) for examples:
 
 Please see [NIH Interop - Common Attributes](https://docs.google.com/spreadsheets/d/1MxfcWDXhTfFNFKsbRGjGTQkBoTirNktj04lf6L9_jmk/edit#gid=0) for more details about some of the fields.
 
@@ -84,7 +84,8 @@ Please see [NIH Interop - Common Attributes](https://docs.google.com/spreadsheet
 
 ## Output manifest file format
 
-The output manifest file is a TSV file with the following fields:
+The output manifest file is a TSV file with the following fields.  See [sample.output.s3.manifest.tsv](sample.output.s3.manifest.tsv) for examples:
+
 
 * study\_registration
 * study\_id
