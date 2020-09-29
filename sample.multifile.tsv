@@ -1,6 +1,0 @@
-study_id	consent_group	participant_id	specimen_id	experimental_strategy	input_file_path
-avteststudy	abc	456	777	XX	sample_data/small.4.txt
-avteststudy	abc	456	777	XX	sample_data/small.5.txt
-avteststudy	abc	456	777	XX	sample_data/small.3.txt
-avteststudy2	ghi	456	777	XX	gs://avteststudy-abc/928204490/xsmall.1.txt
-avteststudy2	ghi	456	777	XX	s3://avteststudy-abc/c789e490a90359de2bd3b09d7e957cfd-128/medium.txt

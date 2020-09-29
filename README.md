@@ -2,6 +2,11 @@
 
 Repo for experimenting with data preparation and upload for the BDCat project.
 
+Please be sure you are always using the latest [release](https://github.com/NimbusInformatics/bdcat-ingest-prototype/releases).
+
+For Data Custodians:
+Please be sure not to share any controlled data (PII - personally identifiable information or PHI - personal health information) to unauthorized parties (including the manifest files, if they contain controlled information) including Nimbus. 
+
 ## Setup Instructions for Ubuntu 20.04 LTS
 
     sudo apt update
@@ -15,11 +20,13 @@ Repo for experimenting with data preparation and upload for the BDCat project.
     echo export PATH=${PATH}:$HOME/gsutil >> ~/.bashrc
 
     # load credentials for google cloud, if necessary
-	gcloud config set pass_credentials_to_gsutil false
+    # please note that the lines with * in front of then only need to be run if you do not already have an application credentials file.
+    * gcloud auth login
+	* gcloud config set pass_credentials_to_gsutil false
 	gsutil config
-	find .config | grep json 
-	# use that path for your GOOGLE_APPLICATION_CREDENTIALS, for example, 
-	# export GOOGLE_APPLICATION_CREDENTIALS=/home/boconnor/./.config/gcloud/legacy_credentials/boconnor@nimbusinformatics.com/adc.json
+	*find ~/.config | grep json 
+	# use that path for your GOOGLE_APPLICATION_CREDENTIALS, for example, /home/boconnor/./.config/gcloud/legacy_credentials/boconnor@nimbusinformatics.com/adc.json
+	export GOOGLE_APPLICATION_CREDENTIALS=<google application credentials JSON file>
 	export GCLOUD_PROJECT=<your project name>
 
     # load credentials for aws, if necesary
@@ -62,7 +69,7 @@ See our [Project Board](https://github.com/orgs/NimbusInformatics/projects/5) fo
 
 ## Input manifest file format
 
-The input manifest file is a TSV file with the following fields. See [sample.multifile.tsv](https://raw.githubusercontent.com/NimbusInformatics/bdcat-ingest-prototype/master/sample.multifile.tsv) for examples:
+The input manifest file is a TSV file with the following fields. See [sample.cloud.tsv](sample.cloud.tsv) for examples:
 
 Please see [NIH Interop - Common Attributes](https://docs.google.com/spreadsheets/d/1MxfcWDXhTfFNFKsbRGjGTQkBoTirNktj04lf6L9_jmk/edit#gid=0) for more details about some of the fields.
 
@@ -84,7 +91,8 @@ Please see [NIH Interop - Common Attributes](https://docs.google.com/spreadsheet
 
 ## Output manifest file format
 
-The output manifest file is a TSV file with the following fields:
+The output manifest file is a TSV file with the following fields.  See [sample.output.s3.manifest.tsv](sample.output.s3.manifest.tsv) for examples:
+
 
 * study\_registration
 * study\_id
