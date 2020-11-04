@@ -59,6 +59,38 @@ Please be sure not to share any controlled data (PII - personally identifiable i
 
 The output manifest file will be located at sample.mulifile.<timestamp>manifest.tsv
 
+### Usage
+
+```
+ This script was written for the NIH BioData Catalyst to process an input manifest file
+ containing file locations and file metadata, and upload the files to Amazon and Google 
+ Cloud services.
+
+ usage: process.py [-h] --tsv TSV [--gs] [--aws] [--test] [--resume]
+                  [--threads THREADS] [--chunk-size CHUNK_SIZE]
+
+ required arguments:
+
+ --tsv					local file path to input manifest file 
+
+ --gs                  upload to Google Cloud
+ --aws                 upload to AWS
+ Either --gs or --aws needs to be specified. Both arguments can also be specified. 
+
+ optional arguments:
+ -h, --help            show help message
+ --test                test mode: confirm input manifest file is valid
+ --resume              run process in RESUME mode, with the given manifest file
+ --threads THREADS     number of concurrent threads (default: number of CPUs on machine)
+ --chunk-size CHUNK_SIZE
+                       mulipart-chunk-size for uploading (default: 8 * 1024 * 1024)
+ --max-download-size MAX_DOWNLOAD_SIZE
+                       in the case of cloud to cloud transfers, the fastest method is to 
+						first download the file, compute the checksums, then upload the
+                       file. This value specifies the largest file size that should be
+                       downloaded, in MB
+```
+
 ## Design Doc
 
 See [20200608 - Data Ingest Brainstorming](https://docs.google.com/document/d/1bZHUKZPL7Q7onKLSdR3YBrM7oeREC54yf1g_Dpc2yVI/edit) for design information.  
