@@ -1,0 +1,266 @@
+import base64
+import csv
+import datetime
+import os
+from os.path import isfile, basename
+import subprocess
+import threading
+import uuid
+
+import concurrent.futures
+import struct
+import crcmod
+import hashlib
+
+from collections import OrderedDict 
+
+from google.cloud import storage
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from google.api_core.exceptions import BadRequest, Forbidden
+from google.cloud.exceptions import NotFound
+
+def get_bucket_name(study_id, consent_group):
+	return study_id.replace(".", "-") + '--' + consent_group
+
+def gcs_bucket_writeable(bucket_name):
+	storage_client = storage.Client()
+
+	try:
+		bucket = storage_client.bucket(bucket_name)
+		returnedPermissions = bucket.test_iam_permissions('storage.objects.create')
+		if ('storage.objects.create' in returnedPermissions):
+			return True
+		else:
+			print('ERROR: gs bucket is not writeable', bucket_name)
+			return False					
+	except BadRequest as e:
+		print('ERROR: gs bucket does not exist -', bucket_name, e)
+		return False
+	except Forbidden as e2:
+		print('ERROR: gs bucket is not accessible by user -', bucket_name, e2)
+		return False
+	except Exception as e3:
+		print(e3)
+		print('ERROR: gs bucket does not exist or is not accessible by user -', bucket_name, e3)
+		return False			
+
+def generate_dict_from_gcs_bucket(gcs_bucket, study_id, consent_group):
+	od = OrderedDict()
+	
+	print('bucket', gcs_bucket)
+	client = storage.Client()
+	blobs = client.list_blobs(gcs_bucket)
+
+	for blob in blobs:
+#		print(blob.name)
+		row = get_empty_file_metadata()
+		blob.reload()
+		row['study_id'] = study_id
+		row['consent_group'] = consent_group 	
+		row['file_name'] = 'gs://' + gcs_bucket + '/' + blob.name
+		row['file_size'] = blob.size
+		row['file_crc32c'] = blob.crc32c		
+		if (blob.md5_hash):
+			row['md5sum'] = base64.b64decode(blob.md5_hash).hex()
+		od[blob.name] = row
+	return od
+
+def get_empty_file_metadata():
+	row = {}
+	row['study_id'] = ''
+	row['consent_group'] = '' 	
+	row['file_type'] = '' 	
+	row['file_name'] = ''
+	row['file_size'] = ''
+	row['file_crc32c'] = ''
+	row['guid'] = ''
+	row['ga4gh_drs_uri'] = ''
+	row['md5sum'] = ''
+	row['gs_crc32c'] = ''
+	row['gs_path'] = ''
+	row['gs_modified_date'] = ''
+	row['gs_file_size'] = ''
+	row['s3_md5sum'] =''
+	row['s3_path'] = ''
+	row['s3_modified_date'] = ''
+	row['s3_file_size'] = ''
+	return row
+
+def get_file_metadata_for_file_path(file_path, study_id, consent_group):
+	row = get_empty_file_metadata()
+	row['study_id'] = study_id
+	row['consent_group'] = consent_group
+	row['file_name'] = file_path
+	row['file_size'] = os.stat(file_path).st_size	
+	return row
+	
+def get_receipt_manifest_file_pointer_for_bucket(bucket_name):
+	timestr = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+	manifest_filepath = bucket_name + '.manifest.' + timestr + '.tsv'
+	f = open(manifest_filepath, 'wt')
+	return f
+
+def download_gcs_bucket_to_localdisk(gcs_bucket, gcs_user_project):
+	subprocess.check_call([
+		'gsutil', '-u', gcs_user_project,
+		'-m', 'cp',
+		'-r', 'gs://%s' % (gcs_bucket), gcs_bucket
+	])
+	print('downloaded gs://%s to %s' % (gcs_bucket, gcs_bucket))
+
+def upload_from_localdisk_to_gcs_bucket(directory_path, upload_gcs_bucket_name):
+	subprocess.check_call([
+		'gsutil',
+		'-m', 'cp',
+		'-r', directory_path, 'gs://%s' % (upload_gcs_bucket_name)
+	])
+	print('uploaded %s to gs://%s' % (directory_path, upload_gcs_bucket_name))
+
+def add_metadata_for_uploaded_gcs_bucket(exclude_path, od, upload_gcs_bucket_name):
+	storage_client = storage.Client()
+
+	bucket = storage_client.bucket(upload_gcs_bucket_name)
+	for key, row in od.items():
+		file_path = row['file_name']
+		if ('intermediate_file_name' in row and row['intermediate_file_name'] != ''):
+			file_path = row['intermediate_file_name']
+		if (exclude_path != ''):
+			file_path = file_path.replace(exclude_path, '')
+		blob = bucket.blob(file_path)
+		blob.reload()
+		row['gs_path'] = 'gs://' + upload_gcs_bucket_name+ '/' + blob.name
+		row['gs_modified_date'] = format(blob.updated)
+		row['gs_file_size'] = blob.size
+		row['gs_crc32c'] = blob.crc32c	
+		if (row['file_crc32c'] != row['gs_crc32c']):
+			print("Checksum for", blob.name, "did not match:", row['file_crc32c'], '!=', row['gs_crc32c'])
+			
+def upload_manifest_file_to_gcs_bucket(receipt_manifest_file_path, upload_gcs_bucket_name):
+	storage_client = storage.Client()
+
+	print("Uploading ", receipt_manifest_file_path, " to gs://", upload_gcs_bucket_name, sep='')
+	bucket = storage_client.bucket(upload_gcs_bucket_name)
+	blob = bucket.blob(basename(receipt_manifest_file_path))
+	blob.upload_from_filename(receipt_manifest_file_path)
+
+	
+def assign_guids(od):
+	for key, row in od.items():
+		add_new_drs_uri(row)
+		
+def add_new_drs_uri(row):
+	if (not row['ga4gh_drs_uri'].startswith('drs://')):
+		x = uuid.uuid4()		
+		row['guid'] = 'dg.4503/' + str(x)
+		row['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503%2F" + str(x)
+
+def calculate_crc32c_threaded(od, num_threads):
+	print('Calculating crc32c checksums with', num_threads, 'threads')
+	start = datetime.datetime.now()
+	with concurrent.futures.ThreadPoolExecutor(num_threads) as executor:	
+		futures = [executor.submit(calculate_crc32c, row) for key, row in od.items()]
+		print("Executing total", len(futures), "jobs")
+
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+			except ValueError as e:
+				print(e)
+	end = datetime.datetime.now()
+	print('Elapsed time for crc32c checksums:', end - start)
+
+def calculate_crc32c(row):
+	if (row['file_crc32c'] != ''):
+		# already have value. don't need to compute
+		return
+
+	file_path = row['file_name']
+	if ('intermediate_file_name' in row and row['intermediate_file_name'] != ''):
+		file_path = row['intermediate_file_name']
+
+	if (file_path.startswith('gs://') or file_path.startswith('s3://')):
+		# only calculate checksum if we have a localfile
+		return
+	print("Calculating crc32c for ", file_path)
+	start = datetime.datetime.now()			
+	crc32c = crcmod.predefined.Crc('crc-32c')
+	with open(file_path, 'rb') as fp:
+		while True:
+			data = fp.read(8192)
+			if not data:
+				break
+			crc32c.update(data)
+	end = datetime.datetime.now()
+	base64_value = base64.b64encode(crc32c.digest()).decode('utf-8')
+	print('Elapsed time for checksum:', crc32c.crcValue, base64_value, end - start)
+	row['file_crc32c'] = base64_value
+
+def calculate_md5sum_threaded(od, num_threads):
+	print('Calculating md5 checksums with', num_threads, 'threads')
+	start = datetime.datetime.now()
+	with concurrent.futures.ThreadPoolExecutor(num_threads) as executor:	
+		futures = [executor.submit(calculate_md5sum, row) for key, row in od.items()]
+		print("Executing total", len(futures), "jobs")
+
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+			except ValueError as e:
+				print(e)
+	end = datetime.datetime.now()
+	print('Elapsed time for md5 checksums:', end - start)
+	
+def calculate_md5sum(row):
+	if (row['md5sum'] != ''):
+		# already have value. don't need to compute
+		return
+
+	file_path = row['file_name']
+	if ('intermediate_file_name' in row and row['intermediate_file_name'] != ''):
+		file_path = row['intermediate_file_name']
+
+	if (file_path.startswith('gs://') or file_path.startswith('s3://')):
+		# only calculate checksum if we have a localfile
+		return
+	
+	print("Calculating md5sum for ", file_path)
+
+	m = hashlib.md5()
+	with open(file_path, 'rb') as fp:
+		while True:
+			data = fp.read(8192)
+			if not data:
+				break
+			m.update(data)
+
+	row['md5sum'] = m.hexdigest()
+
+def generate_dict_from_input_manifest_file(input_manifest_file_path, manifest_keys):
+	od = OrderedDict()
+		
+	reader = csv.DictReader(input_manifest_file_path, dialect='excel-tab')
+	for row in reader:
+		print(row)
+		od[row['file_name']] = row
+		for manifest_key in manifest_keys:
+			if (manifest_key not in row):
+				row[manifest_key] = ''
+
+	return od
+
+def update_manifest_file(f, od):
+	with threading.Lock():
+		# start from beginning of file
+		f.seek(0)
+		f.truncate()
+	
+		isfirstrow = True
+		tsv_writer = csv.writer(f, delimiter='\t')
+		for key, row in od.items():
+			if (isfirstrow):
+				# print header row
+				tsv_writer.writerow(row.keys())
+				isfirstrow = False 
+			tsv_writer.writerow(row.values())
+	# we don't close the file until the end of the operation		
