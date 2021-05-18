@@ -209,7 +209,7 @@ def verify_gcloud_upload(value, bucket, bucket_name):
 
 #	print("checking blob gs://" + bucket_name + '/' +  path)
 	blob = bucket.get_blob(path)
-	if (blob.exists()):
+	if ((blob is not None) and blob.exists()):
 		blob.reload()
 		value['gs_crc32c'] = blob.crc32c
 		add_gs_manifest_metadata(value, blob, "gs://" + bucket_name + '/' +  path, path)
