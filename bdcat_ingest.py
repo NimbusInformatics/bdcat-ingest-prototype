@@ -6,6 +6,7 @@ from os.path import isfile, basename
 import subprocess
 import threading
 import uuid
+from urllib.parse import urlparse
 
 import concurrent.futures
 import struct
@@ -19,6 +20,11 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud.exceptions import NotFound
+
+# for aws s3
+import logging
+import boto3
+import botocore
 
 def get_bucket_name(study_id, consent_group):
 	return study_id.replace(".", "-") + '--' + consent_group
@@ -105,16 +111,24 @@ def download_gcs_bucket_to_localdisk(gcs_bucket, gcs_user_project):
 	subprocess.check_call([
 		'gsutil', '-u', gcs_user_project,
 		'-m', 'cp',
-		'-r', 'gs://%s' % (gcs_bucket), gcs_bucket
+		'-r', 'gs://%s' % (gcs_bucket), '.'
 	])
 	print('downloaded gs://%s to %s' % (gcs_bucket, gcs_bucket))
 
-def upload_from_localdisk_to_gcs_bucket(directory_path, upload_gcs_bucket_name):
-	subprocess.check_call([
-		'gsutil',
-		'-m', 'cp',
-		'-r', directory_path, 'gs://%s' % (upload_gcs_bucket_name)
-	])
+def upload_from_localdisk_to_gcs_bucket(directory_path, upload_gcs_bucket_name, gcs_user_project):
+	if (gcs_user_project != ''):
+		subprocess.check_call([
+			'gsutil', '-u', gcs_user_project,
+			'-m', 'cp',
+			'-r', directory_path, 'gs://%s' % (upload_gcs_bucket_name)
+		])	
+	else:
+		subprocess.check_call([
+			'gsutil',
+			'-m', 'cp',
+			'-r', directory_path, 'gs://%s' % (upload_gcs_bucket_name)
+		])
+		
 	print('uploaded %s to gs://%s' % (directory_path, upload_gcs_bucket_name))
 
 def add_metadata_for_uploaded_gcs_bucket(exclude_path, od, upload_gcs_bucket_name):
@@ -144,6 +158,24 @@ def upload_manifest_file_to_gcs_bucket(receipt_manifest_file_path, upload_gcs_bu
 	blob = bucket.blob(basename(receipt_manifest_file_path))
 	blob.upload_from_filename(receipt_manifest_file_path)
 
+def update_metadata_for_s3_keys(od):
+	for key, row in od.items():
+		s3_path = row['s3_path']
+		(bucket_name, key) = get_bucket_and_key_for_cloud_url(s3_path)
+		add_metadata_for_s3_key(bucket_name, key, row)
+
+def add_metadata_for_s3_key(bucket_name, key, fields):
+	s3 = boto3.client('s3')
+	response = s3.head_object(Bucket=bucket_name, Key=key)
+	add_aws_manifest_metadata(fields, response, 's3://' + bucket_name + '/' + key)	
+
+def add_aws_manifest_metadata(fields, response, path):
+	file_size = response['ContentLength']
+	fields['s3_md5sum'] = response['ETag'][1:-1]
+	fields['s3_path'] = path
+	fields['s3_modified_date'] = format(response['LastModified'])
+	fields['s3_file_size'] = file_size
+	print('updated:', fields)
 	
 def assign_guids(od):
 	for key, row in od.items():
@@ -236,16 +268,20 @@ def calculate_md5sum(row):
 
 	row['md5sum'] = m.hexdigest()
 
-def generate_dict_from_input_manifest_file(input_manifest_file_path, manifest_keys):
+# manifest_keys are used to add additional keys to the manifest
+
+def generate_dict_from_input_manifest_file(input_manifest_file, manifest_keys):
+	print(input_manifest_file.name)
 	od = OrderedDict()
 		
-	reader = csv.DictReader(input_manifest_file_path, dialect='excel-tab')
+	reader = csv.DictReader(input_manifest_file, dialect='excel-tab')
 	for row in reader:
 		print(row)
 		od[row['file_name']] = row
-		for manifest_key in manifest_keys:
-			if (manifest_key not in row):
-				row[manifest_key] = ''
+		if (manifest_keys):
+			for manifest_key in manifest_keys:
+				if (manifest_key not in row):
+					row[manifest_key] = ''
 
 	return od
 
@@ -264,3 +300,7 @@ def update_manifest_file(f, od):
 				isfirstrow = False 
 			tsv_writer.writerow(row.values())
 	# we don't close the file until the end of the operation		
+
+def get_bucket_and_key_for_cloud_url(cloud_url):
+	o = urlparse(cloud_url, allow_fragments=False)
+	return (o.netloc, o.path.lstrip('/'))

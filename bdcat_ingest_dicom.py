@@ -91,8 +91,14 @@ def generate_nifti_file(dicom_stack, nifti_file_name):
 	dicom_file_names = dicom_reader.GetGDCMSeriesFileNames(dicom_stack)
 	print ('in generate_nifti_file, dicom_file_names =', dicom_file_names)
 	dicom_reader.SetFileNames(dicom_file_names)
-	output_image = dicom_reader.Execute()
-	sitk.WriteImage(output_image, nifti_file_name, compressOutput)
+	try:
+		output_image = dicom_reader.Execute()
+		sitk.WriteImage(output_image, nifti_file_name, compressOutput)
+	except RuntimeError as err:
+		print('ERROR Generating', nifti_file_name, ':', err)
+		# create an empty nifti file
+		with open(nifti_file_name, 'w') as fp:
+			pass
 
 def generate_dicom_stack_metadata_files(od, study_id, consent_group):
 	dicom_dictionary = get_dicom_stacks_for_value(od, 'metadata_file_name')
@@ -126,10 +132,13 @@ def generate_dicom_stack_metadata_file(od, dicom_stack, metadata_file_name, stud
 		values = []
 		values.append(basename(dicom_file_name))
 		temp_row = {}
+		file_keys = reader.GetMetaDataKeys()
 		
 		for key in keys:
 			if (key != 'dicom_file_name'):
-				value = reader.GetMetaData(key)
+				value = ''
+				if (key in file_keys):
+					value = reader.GetMetaData(key)
 				values.append(value)
 				# This updates the row for the dicom stack metadata file. The assumption is that
 				# this value is the same across all files in the stack.
