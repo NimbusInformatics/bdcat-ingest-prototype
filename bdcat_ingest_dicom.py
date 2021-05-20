@@ -9,6 +9,7 @@ import threading
 from collections import OrderedDict 
 
 from bdcat_ingest import generate_dict_from_gcs_bucket
+from bdcat_ingest import generate_dict_from_file_directory
 from bdcat_ingest import get_file_metadata_for_file_path
 
 import pydicom
@@ -53,6 +54,45 @@ def generate_dict_from_gcs_bucket_for_dicom(gcs_bucket, study_id, consent_group)
 			row['metadata_file_name'] = row['dicom_stack'] + '.tsv'
 	return od		
 
+def generate_dict_from_file_directory_for_dicom(file_directory, study_id, consent_group):
+	od = generate_dict_from_file_directory(file_directory, study_id, consent_group, None)
+	for key, row in od.items():
+		# these are additional fields for dicom files
+		row['intermediate_file_name'] = row['file_name']
+		row['dicom_stack'] = ''	
+		row['nifti_file_name'] = ''	
+		row['metadata_file_name'] = ''					
+		# dicom metadata fields
+		row['participant_id'] = ''
+		row['SeriesDescription'] = '' 
+		row['StudyInstanceUID'] = '' 
+		row['SeriesInstanceUID'] = '' 
+		row['StudyDate'] = '' 
+		row['ConvolutionKernel'] = '' 
+		row['Manufacturer'] = '' 
+		row['ManufacturerModelName'] = '' 
+		row['SliceThickness'] = '' 
+		row['ReconstructionDiameter'] = '' 
+
+
+		curr_file_name = row['file_name']
+		if (curr_file_name.startswith('gs://')):
+			row['intermediate_file_name'] = row['file_name']
+			row['intermediate_file_name'] = row['intermediate_file_name'].replace('gs://' , '', 1)
+			curr_file_name = row['intermediate_file_name']
+		elif (curr_file_name.startswith('s3://')):
+			row['intermediate_file_name'] = row['file_name']
+			row['intermediate_file_name'] = row['intermediate_file_name'].replace('s3://', '', 1)
+			curr_file_name = row['intermediate_file_name']		
+		file_name, file_extension = os.path.splitext(curr_file_name)
+		if (file_extension == '.dcm'):
+			row['file_type'] = 'DICOM'
+			# the parent directory is the DICOM stack
+			row['dicom_stack'] = os.path.dirname(curr_file_name)			
+			row['nifti_file_name'] = row['dicom_stack'] + '.nii'
+			row['metadata_file_name'] = row['dicom_stack'] + '.tsv'
+	return od	
+
 def generate_nifti_files(od, study_id, consent_group):
 	dicom_dictionary = get_dicom_stacks_for_value(od, 'nifti_file_name')
 	for dicom_stack, nifti_file_name in dicom_dictionary.items():
@@ -89,7 +129,7 @@ def generate_nifti_file(dicom_stack, nifti_file_name):
 	compressOutput = bool(True)
 	dicom_reader = sitk.ImageSeriesReader()
 	dicom_file_names = dicom_reader.GetGDCMSeriesFileNames(dicom_stack)
-	print ('in generate_nifti_file, dicom_file_names =', dicom_file_names)
+#	print ('in generate_nifti_file, dicom_file_names =', dicom_file_names)
 	dicom_reader.SetFileNames(dicom_file_names)
 	try:
 		output_image = dicom_reader.Execute()

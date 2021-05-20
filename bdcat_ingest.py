@@ -2,7 +2,7 @@ import base64
 import csv
 import datetime
 import os
-from os.path import isfile, basename
+from os.path import isfile, basename, join
 import subprocess
 import threading
 import uuid
@@ -283,6 +283,24 @@ def generate_dict_from_input_manifest_file(input_manifest_file, manifest_keys):
 				if (manifest_key not in row):
 					row[manifest_key] = ''
 
+	return od
+
+def generate_dict_from_file_directory(file_directory, study_id, consent_group, manifest_keys):
+	od = OrderedDict()
+
+	# r=root, d=directories, f = files
+	for r, d, f in os.walk(file_directory):
+		for file in f:
+			file_path = os.path.join(r, file)
+			row = get_file_metadata_for_file_path(file_path, study_id, consent_group)
+			od[row['file_name']] = row
+			if (manifest_keys):
+				for manifest_key in manifest_keys:
+					if (manifest_key not in row):
+						row[manifest_key] = ''
+
+	# sort by file name
+	od = OrderedDict(sorted(od.items(), key=lambda x: x[1]['file_name']))
 	return od
 
 def update_manifest_file(f, od):
