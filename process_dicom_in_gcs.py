@@ -25,7 +25,9 @@
 #                       mulipart-chunk-size for uploading (default: 8 * 1024 * 1024)
 
 #source activate nimbus--data-ingest
-#time python process_dicom_in_gcs.py --gcs_bucket idc-tcia-tcga-read --gcs_user_project nimbus-fhir-test --study_id nimbusdicomtest --consent_group c1
+#time python process_dicom_in_gcs.py --gcs_bucket idc-tcia-tcga-read --gcs_user_project nimbus-fhir-test --study_id idc-tcia-tcga-read --consent_group oa
+#time python process_dicom_in_gcs.py --gcs_bucket idc-tcia-tcga-prad --gcs_user_project nimbus-fhir-test --study_id idc-tcia-tcga-prad --consent_group oa
+#time python process_dicom_in_gcs.py --gcs_bucket idc-tcia-tcga-lusc --gcs_user_project nimbus-fhir-test --study_id idc-tcia-tcga-lusc --consent_group oa
 
 import argparse
 import signal
@@ -67,7 +69,7 @@ def main():
 	update_dicom_manifest_file(out_file, od)
 
 	# download files
-#	download_gcs_bucket_to_localdisk(args.gcs_bucket, args.gcs_user_project)
+	download_gcs_bucket_to_localdisk(args.gcs_bucket, args.gcs_user_project)
 	
 	# generate DICOM manifests
 	generate_dicom_stack_metadata_files(od, args.study_id, args.consent_group)
@@ -88,7 +90,7 @@ def main():
 	update_dicom_manifest_file(out_file, od)
 		
 	# upload directory and manifest
-	upload_from_localdisk_to_gcs_bucket(args.gcs_bucket + '/dicom', upload_gcs_bucket_name)
+	upload_from_localdisk_to_gcs_bucket(args.gcs_bucket + '/dicom', upload_gcs_bucket_name, args.gcs_user_project)
 	# add metadata and check checksums for upload
 	add_metadata_for_uploaded_gcs_bucket(args.gcs_bucket + '/', od, upload_gcs_bucket_name)
 	update_dicom_manifest_file(out_file, od)
