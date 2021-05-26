@@ -2,11 +2,13 @@ import base64
 import csv
 import datetime
 import os
-from os.path import isfile, basename, join
+from os.path import isfile, basename, join, splitext
 import subprocess
 import threading
 import uuid
 from urllib.parse import urlparse
+import tempfile
+from os import access, R_OK
 
 import concurrent.futures
 import struct
@@ -20,6 +22,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.api_core.exceptions import BadRequest, Forbidden
 from google.cloud.exceptions import NotFound
+from google.cloud.storage.retry import DEFAULT_RETRY
 
 # for aws s3
 import logging
@@ -72,6 +75,53 @@ def generate_dict_from_gcs_bucket(gcs_bucket, study_id, consent_group):
 		od[blob.name] = row
 	return od
 
+def generate_dict_from_s3_bucket(s3_bucket, study_id, consent_group):
+	od = OrderedDict()
+
+	print('bucket', s3_bucket)
+	aws_client = boto3.client('s3')	
+
+	paginator = aws_client.get_paginator('list_objects_v2')
+	pages = paginator.paginate(Bucket=s3_bucket, Prefix='')
+
+	for page in pages:
+		for obj in page['Contents']:
+#			print(obj)
+			key = obj['Key']
+			row = {}
+			row['input_file_path'] = 's3://' + s3_bucket + '/' + key
+			row['file_name'] = 's3://' + s3_bucket + '/' + key
+			row['s3_file_size'] = obj['Size']
+			row['s3_md5sum'] = obj['ETag'][1:-1]
+			if ("-" not in row['s3_md5sum']):
+				row['md5sum'] = row['s3_md5sum']
+			else:
+				row['md5sum'] = ''
+			row['s3_path'] = row['file_name']
+			row['s3_modified_date'] = format(obj['LastModified'])
+			od[key] = row
+	return od
+
+def add_aws_manifest_metadata(fields, response, path):
+	file_size = response['ContentLength']
+#	print ("size:", file_size)
+	md5sum = response['ETag'][1:-1]
+	if ("-" not in md5sum):
+		fields['md5sum'] = md5sum
+	print('checksum check:', fields['s3_md5sum'], ':', md5sum)
+	if (fields['s3_md5sum'] != md5sum):
+#		print('same checksum')
+#	else:
+		print('different checksum')
+	fields['s3_path'] = path
+	fields['s3_modified_date'] = format(response['LastModified'])
+	fields['s3_file_size'] = file_size
+	if (len(fields['md5sum']) == 0):
+		md5sum = calculate_md5sum(fields['input_file_path'])
+		fields['md5sum'] = md5sum
+	if (not fields['ga4gh_drs_uri'].startswith("drs://")):
+		add_drs_uri_from_path(fields, path)
+
 def get_empty_file_metadata():
 	row = {}
 	row['study_id'] = ''
@@ -98,7 +148,8 @@ def get_file_metadata_for_file_path(file_path, study_id, consent_group):
 	row['study_id'] = study_id
 	row['consent_group'] = consent_group
 	row['file_name'] = file_path
-	row['file_size'] = os.stat(file_path).st_size	
+	row['file_size'] = os.stat(file_path).st_size
+	row['file_type'] = os.path.splitext(file_path)[1][1:]	
 	return row
 	
 def get_receipt_manifest_file_pointer_for_bucket(bucket_name):
@@ -142,7 +193,7 @@ def add_metadata_for_uploaded_gcs_bucket(exclude_path, od, upload_gcs_bucket_nam
 		if (exclude_path != ''):
 			file_path = file_path.replace(exclude_path, '')
 		blob = bucket.blob(file_path)
-		blob.reload()
+		blob.reload(timeout=120, retry=DEFAULT_RETRY)
 		row['gs_path'] = 'gs://' + upload_gcs_bucket_name+ '/' + blob.name
 		row['gs_modified_date'] = format(blob.updated)
 		row['gs_file_size'] = blob.size
@@ -182,7 +233,7 @@ def assign_guids(od):
 		add_new_drs_uri(row)
 		
 def add_new_drs_uri(row):
-	if (not row['ga4gh_drs_uri'].startswith('drs://')):
+	if ('ga4gh_drs_uri' not in row or not row['ga4gh_drs_uri'].startswith('drs://')):
 		x = uuid.uuid4()		
 		row['guid'] = 'dg.4503/' + str(x)
 		row['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503%2F" + str(x)
@@ -322,3 +373,73 @@ def update_manifest_file(f, od):
 def get_bucket_and_key_for_cloud_url(cloud_url):
 	o = urlparse(cloud_url, allow_fragments=False)
 	return (o.netloc, o.path.lstrip('/'))
+
+def remove_file_types_from_dict(od, file_types):
+	keys_to_delete = []
+		
+	for key, row in od.items():
+		file_type= row['file_type']
+		if (file_type in file_types):
+			keys_to_delete.append(key)
+		
+	for key in keys_to_delete:
+		del od[key]
+
+def calculate_md5um_for_cloud_paths(od):
+	for key, row in od.items():
+		if (row['md5sum'] == ''):
+			row['md5sum'] = calculate_md5sum_for_cloud_path(row['file_name'])
+
+
+def calculate_md5sum_for_cloud_path(cloud_path):
+	local_file = cloud_path
+	tmpfilepath = ''
+	
+	print("Calculating md5sum for ", cloud_path)
+	try:	
+		if(cloud_path.startswith("gs://") or cloud_path.startswith("s3://")):
+			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
+			obj = urlparse(cloud_path, allow_fragments=False)
+#fixme stream file instead. this affects cases where it is gs -> gs or s3 -> s3 and the md5sum is not stored on server		
+			if(local_file.startswith("gs://")):						
+				download_gs_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
+				local_file = tmpfilepath
+			elif(local_file.startswith("s3://")):
+				download_aws_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
+				local_file = tmpfilepath
+		if (isfile(local_file) and access(local_file, R_OK)):
+			m = hashlib.md5()
+			with open(local_file, 'rb') as fp:
+				while True:
+					data = fp.read(65536)
+					if not data:
+						break
+					m.update(data)
+		else:
+			print("Not a valid path in calculate_md5sum: ", cloud_path)	
+			return
+	finally:
+		if (tmpfilepath):
+			# remove temp file
+			os.remove(tmpfilepath)
+		
+	return m.hexdigest()
+
+
+		
+# Given a gs:// path, download it to download_path_name
+
+def download_gs_key(bucket_name, key, download_path_name):
+	subprocess.check_call([
+		'gsutil',
+		'-o', 'GSUtil:parallel_composite_upload_threshold=%s' % ('150M'),
+		'cp', 'gs://%s/%s' % (bucket_name, key), download_path_name
+	])
+	print('downloaded gs://%s/%s to %s' % (bucket_name, key, download_path_name))				
+
+# Given an s3:// path, download it to download_path_name
+
+def download_aws_key(bucket_name, key, download_path_name):
+	s3 = boto3.client('s3')
+	s3.download_file(bucket_name, key, download_path_name)
+	print('downloaded s3://%s/%s to %s' % (bucket_name, key, download_path_name))				
