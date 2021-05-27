@@ -151,65 +151,80 @@ def generate_dicom_stack_metadata_file(od, dicom_stack, metadata_file_name, stud
 	dicom_file_names = get_dicom_image_files_for_stack(od, dicom_stack)
 	keys = ['dicom_file_name']
 	value_rows = []
-
+	print ('in generate_dicom_stack_metadata_file, metadata_file_name = ', metadata_file_name)
 	# read once to get the set of keys used in the image files
 	for dicom_file_name in dicom_file_names:
-		print ('in generate_dicom_stack_metadata_file, dicom_file_name = ', dicom_file_name)
+		#print ('in generate_dicom_stack_metadata_file, dicom_file_name = ', dicom_file_name)
 		reader = sitk.ImageFileReader()
 		reader.SetFileName(dicom_file_name)
 	#	reader.LoadPrivateTagsOn()
-		reader.ReadImageInformation()
-		
-		for key in reader.GetMetaDataKeys():
-			if (key not in keys):
-				keys.append(key)
+		try:
+			reader.ReadImageInformation()		
+			for key in reader.GetMetaDataKeys():
+				if (key not in keys):
+					keys.append(key)
+		except RuntimeError as err:
+			print('ERROR reading', dicom_file_name, ':', err)
 
+	temp_row = {}
 	for dicom_file_name in dicom_file_names:
-		reader = sitk.ImageFileReader()
-		reader.SetFileName(dicom_file_name)
-	#	reader.LoadPrivateTagsOn()
-		reader.ReadImageInformation()
-		values = []
-		values.append(basename(dicom_file_name))
-		temp_row = {}
-		file_keys = reader.GetMetaDataKeys()
+		try:
+			reader = sitk.ImageFileReader()
+			reader.SetFileName(dicom_file_name)
+		#	reader.LoadPrivateTagsOn()
+			reader.ReadImageInformation()
+			values = []
+			values.append(basename(dicom_file_name))
+			temp_row = {}
+			file_keys = reader.GetMetaDataKeys()
 		
-		for key in keys:
-			if (key != 'dicom_file_name'):
-				value = ''
-				if (key in file_keys):
-					value = reader.GetMetaData(key)
-				values.append(value)
-				# This updates the row for the dicom stack metadata file. The assumption is that
-				# this value is the same across all files in the stack.
-				if (key == '0010|0020' and value != ''):
-					temp_row['participant_id'] = value
-				if ((key == '0008|103E' or key == '0008|103e') and value != ''):
-					temp_row['SeriesDescription'] = value 
-				if ((key == '0020|000D' or key == '0020|000d') and value != ''):
-					temp_row['StudyInstanceUID'] = value 
-				if ((key == '0020|000E' or key == '0020|000e') and value != ''):
-					temp_row['SeriesInstanceUID'] = value 
-				if (key == '0008|0020' and value != ''):
-					temp_row['StudyDate'] = value 
-				if (key == '0018|1210' and value != ''):
-					temp_row['ConvolutionKernel'] = value 
-				if (key == '0008|0070' and value != ''):
-					temp_row['Manufacturer'] = value 
-				if (key == '0008|1090' and value != ''):
-					temp_row['ManufacturerModelName'] = value 
-				if (key == '0018|0050' and value != ''):
-					temp_row['SliceThickness'] = value 
-				if (key == '0018|1100' and value != ''):
-					temp_row['ReconstructionDiameter'] = value 	
-		value_rows.append(values)		       
-
-	with open(metadata_file_name, "w") as outfile:
-		tsv_writer = csv.writer(outfile, delimiter='\t')
-		tsv_writer.writerow(keys)
-		for values in value_rows:
-			tsv_writer.writerow(values)
-
+			for key in keys:
+				if (key != 'dicom_file_name'):
+					value = ''
+					if (key in file_keys):
+						value = reader.GetMetaData(key)
+						# to get around encoding issues
+						value = value.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace')
+					values.append(value)
+					# This updates the row for the dicom stack metadata file. The assumption is that
+					# this value is the same across all files in the stack.
+					if (key == '0010|0020' and value != ''):
+						temp_row['participant_id'] = value
+					if ((key == '0008|103E' or key == '0008|103e') and value != ''):
+						temp_row['SeriesDescription'] = value 
+					if ((key == '0020|000D' or key == '0020|000d') and value != ''):
+						temp_row['StudyInstanceUID'] = value 
+					if ((key == '0020|000E' or key == '0020|000e') and value != ''):
+						temp_row['SeriesInstanceUID'] = value 
+					if (key == '0008|0020' and value != ''):
+						temp_row['StudyDate'] = value 
+					if (key == '0018|1210' and value != ''):
+						temp_row['ConvolutionKernel'] = value 
+					if (key == '0008|0070' and value != ''):
+						temp_row['Manufacturer'] = value 
+					if (key == '0008|1090' and value != ''):
+						temp_row['ManufacturerModelName'] = value 
+					if (key == '0018|0050' and value != ''):
+						temp_row['SliceThickness'] = value 
+					if (key == '0018|1100' and value != ''):
+						temp_row['ReconstructionDiameter'] = value 	
+			value_rows.append(values)		       
+		except RuntimeError as err:
+			print('ERROR reading', dicom_file_name, ':', err)
+	
+		with open(metadata_file_name, "w") as outfile:
+			tsv_writer = csv.writer(outfile, delimiter='\t')
+			tsv_writer.writerow(keys)
+			for values in value_rows:
+#				try:
+				tsv_writer.writerow(values)
+# 				except UnicodeEncodeError as err:
+# 					print('WARNING: UnicodeEncodeError in ', metadata_file_name, ':', err)
+# 					fixed_values = []
+# 					for value in values:
+# 						fixed_values.append(value.encode('utf-8', 'surrogateescape').decode('utf-8', 'replace'))
+# 						tsv_writer.writerow(fixed_values)
+				
 	metadata_row = get_dicom_file_metadata_for_file_path(metadata_file_name, study_id, consent_group)
 	metadata_row['file_type'] = 'TSV'
 	metadata_row['dicom_stack'] = dicom_stack
@@ -318,4 +333,5 @@ def update_dicom_manifest_file(f, od):
 			if ('file_type' in row and row['file_type'] != 'DICOM'): 
 				tsv_writer.writerow(row.values())
 	# we don't close the file until the end of the operation		
+
 
