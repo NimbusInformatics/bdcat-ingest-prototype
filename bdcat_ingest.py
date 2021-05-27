@@ -462,6 +462,8 @@ def download_gs_key(bucket_name, key, download_path_name):
 # Given an s3:// path, download it to download_path_name
 
 def download_aws_key(bucket_name, key, download_path_name):
-	s3 = boto3.client('s3')
+	sess = boto3.session.Session()
+	s3 = sess.client("s3")
+#	s3 = boto3.client('s3')
 	s3.download_file(bucket_name, key, download_path_name)
 	print('downloaded s3://%s/%s to %s' % (bucket_name, key, download_path_name))				
