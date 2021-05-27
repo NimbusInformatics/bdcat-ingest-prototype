@@ -209,6 +209,11 @@ def upload_manifest_file_to_gcs_bucket(receipt_manifest_file_path, upload_gcs_bu
 	blob = bucket.blob(basename(receipt_manifest_file_path))
 	blob.upload_from_filename(receipt_manifest_file_path)
 
+def upload_manifest_file_to_s3_bucket(receipt_manifest_file_path, upload_s3_bucket_name):
+	aws_client = boto3.client('s3')
+	print("Uploading ", receipt_manifest_file_path, " to s3://", upload_s3_bucket_name, sep='')
+	aws_client.upload_file(receipt_manifest_file_path, upload_s3_bucket_name, basename(receipt_manifest_file_path))
+
 def update_metadata_for_s3_keys(od):
 	for key, row in od.items():
 		s3_path = row['s3_path']
@@ -388,18 +393,35 @@ def remove_file_types_from_dict(od, file_types):
 def calculate_md5um_for_cloud_paths(od):
 	for key, row in od.items():
 		if (row['md5sum'] == ''):
-			row['md5sum'] = calculate_md5sum_for_cloud_path(row['file_name'])
+			calculate_md5sum_for_cloud_path(row)
 
+def calculate_md5sum_for_cloud_paths_threaded(od, num_threads):
+	print('Calculating cloud md5 checksums with', num_threads, 'threads')
+	start = datetime.datetime.now()
+	with concurrent.futures.ThreadPoolExecutor(num_threads) as executor:	
+		futures = [executor.submit(calculate_md5sum_for_cloud_path, row) for key, row in od.items()]
+		print("Executing total", len(futures), "jobs")
 
-def calculate_md5sum_for_cloud_path(cloud_path):
-	local_file = cloud_path
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+			except ValueError as e:
+				print(e)
+	end = datetime.datetime.now()
+	print('Elapsed time for md5 checksums:', end - start)
+
+def calculate_md5sum_for_cloud_path(row):
+	if ('md5sum' in row and row['md5sum'] != ''):
+		return
+
+	local_file = row['file_name']
 	tmpfilepath = ''
 	
-	print("Calculating md5sum for ", cloud_path)
+	print("Calculating md5sum for ", row['file_name'])
 	try:	
-		if(cloud_path.startswith("gs://") or cloud_path.startswith("s3://")):
+		if(row['file_name'].startswith("gs://") or row['file_name'].startswith("s3://")):
 			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
-			obj = urlparse(cloud_path, allow_fragments=False)
+			obj = urlparse(row['file_name'], allow_fragments=False)
 #fixme stream file instead. this affects cases where it is gs -> gs or s3 -> s3 and the md5sum is not stored on server		
 			if(local_file.startswith("gs://")):						
 				download_gs_key(obj.netloc, obj.path.lstrip('/'), tmpfilepath)
@@ -416,14 +438,14 @@ def calculate_md5sum_for_cloud_path(cloud_path):
 						break
 					m.update(data)
 		else:
-			print("Not a valid path in calculate_md5sum: ", cloud_path)	
+			print("Not a valid path in calculate_md5sum: ", row['file_name'])	
 			return
 	finally:
 		if (tmpfilepath):
 			# remove temp file
 			os.remove(tmpfilepath)
 		
-	return m.hexdigest()
+	row['md5sum'] = m.hexdigest()
 
 
 		
