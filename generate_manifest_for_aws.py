@@ -42,7 +42,7 @@ def main():
 	out_file = get_receipt_manifest_file_pointer_for_bucket(args.bucket)	
 	update_manifest_file(out_file, od)				
 	out_file.close()
-#	upload_manifest_file_to_s3_bucket(out_file.name, args.bucket)
+	upload_manifest_file_to_s3_bucket(out_file.name, args.bucket)
 	print("Done. Receipt manifest located at", out_file.name)
 
 def parse_args():

@@ -98,7 +98,7 @@ def generate_nifti_files(od, study_id, consent_group):
 	for dicom_stack, nifti_file_name in dicom_dictionary.items():
 		# FIXME multithread
 		generate_nifti_file(dicom_stack, nifti_file_name)
-		nifti_row = get_file_metadata_for_file_path(nifti_file_name, study_id, consent_group)
+		nifti_row = get_dicom_file_metadata_for_file_path(nifti_file_name, study_id, consent_group)
 		nifti_row['file_type'] = 'NIFTI'
 		nifti_row['dicom_stack'] = dicom_stack
 		# FIXME add more metadata

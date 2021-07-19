@@ -182,6 +182,22 @@ def upload_from_localdisk_to_gcs_bucket(directory_path, upload_gcs_bucket_name, 
 		
 	print('uploaded %s to gs://%s' % (directory_path, upload_gcs_bucket_name))
 
+# aws s3 cp --recursive idc-tcia-tcga-blca s3://idc-tcia-tcga-blca--oa --acl bucket-owner-full-control
+
+def upload_from_localdisk_to_s3_bucket(directory_path, upload_s3_bucket_name, acl_arg):
+	if (acl_arg != ''):
+		subprocess.check_call([
+			'aws', 's3', 'cp', '--recursive', directory_path, 's3://%s' % (upload_s3_bucket_name),
+			'--acl', acl_arg,
+		])	
+	else:
+		subprocess.check_call([
+			'aws', 's3', 'cp', '--recursive', directory_path, 's3://%s' % (upload_s3_bucket_name)
+		])	
+		
+	print('uploaded %s to s3://%s' % (directory_path, upload_s3_bucket_name))
+
+
 def add_metadata_for_uploaded_gcs_bucket(exclude_path, od, upload_gcs_bucket_name):
 	storage_client = storage.Client()
 
@@ -222,7 +238,12 @@ def update_metadata_for_s3_keys(od):
 
 def add_metadata_for_s3_key(bucket_name, key, fields):
 	s3 = boto3.client('s3')
-	response = s3.head_object(Bucket=bucket_name, Key=key)
+	try:
+		response = s3.head_object(Bucket=bucket_name, Key=key)
+	except botocore.exceptions.ClientError as e:
+		print("Error getting metadata for ", key)
+		print(e)
+		
 	add_aws_manifest_metadata(fields, response, 's3://' + bucket_name + '/' + key)	
 
 def add_aws_manifest_metadata(fields, response, path):
@@ -420,7 +441,7 @@ def calculate_md5sum_for_cloud_path(row):
 	print("Calculating md5sum for ", row['file_name'])
 	try:	
 		if(row['file_name'].startswith("gs://") or row['file_name'].startswith("s3://")):
-			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp()
+			(tmpfilepointer, tmpfilepath) = tempfile.mkstemp(None, None, '.', False)
 			obj = urlparse(row['file_name'], allow_fragments=False)
 #fixme stream file instead. this affects cases where it is gs -> gs or s3 -> s3 and the md5sum is not stored on server		
 			if(local_file.startswith("gs://")):						

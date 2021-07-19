@@ -4,7 +4,7 @@
 # containing file locations and file metadata, and generate an output manifest file with
 # cloud data needed for indexing.
 #
-# usage: generate_manifest_from_cloud.py [-h] --bucket BUCKET --tsv TSV [--gs] [--aws] [--test] 
+# usage: generate_manifest_for gcloud.py [-h] --bucket BUCKET --tsv TSV [--gs] [--aws] [--test] 
 #                   [--threads THREADS] [--chunk-size CHUNK_SIZE]
 #
 # required arguments:

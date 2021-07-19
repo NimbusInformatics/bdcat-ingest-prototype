@@ -14,11 +14,17 @@ out_file = ''
 
 def main():
 	args = parse_args()
-	print('Script running version 2.0 on', sys.platform, 'with', os.cpu_count(), 'cpus')
+	print('Script running version 2.0 on', sys.platform, 'with', os.cpu_count(), 'cpus for bucket', args.s3_bucket)
 
 	od = generate_dict_from_input_manifest_file(args.tsv, None)
+	
+	for key, row in od.items():
+		if (row['s3_path'] == ''):
+			gs_path = row['gs_path'] 
+			row['s3_path'] = gs_path.replace('gs://', 's3://')
+	
 	update_metadata_for_s3_keys(od)	
-	out_file = get_receipt_manifest_file_pointer_for_bucket(args.s3_bucket)	
+	out_file = get_receipt_manifest_file_pointer_for_bucket(args.s3_bucket)		
 	update_manifest_file(out_file, od)
 #	upload_manifest_file_to_s3_bucket(out_file.name, upload_gcs_bucket_name)
 	print("Process complete. Manifest file located at", out_file.name)	
@@ -29,7 +35,7 @@ def main():
 def parse_args():
 	parser = argparse.ArgumentParser(description='Generate S3 Manifest')
 	parser.add_argument('--tsv', required=True, type=argparse.FileType('r'), help='tsv file')
-	parser.add_argument('--s3_bucket', type=str, required=True, help='gcs bucket')
+	parser.add_argument('--s3_bucket', type=str, required=True, help='s3 bucket')
 		
 	args = parser.parse_args()
 	if (len(sys.argv) == 0):
