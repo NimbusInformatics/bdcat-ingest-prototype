@@ -65,15 +65,32 @@ def generate_dict_from_gcs_bucket(gcs_bucket, study_id, consent_group):
 #		print(blob.name)
 		row = get_empty_file_metadata()
 		blob.reload()
+		row['input_file_path'] = 'gs://' + gcs_bucket + '/' + blob.name
 		row['study_id'] = study_id
 		row['consent_group'] = consent_group 	
 		row['file_name'] = 'gs://' + gcs_bucket + '/' + blob.name
 		row['file_size'] = blob.size
-		row['file_crc32c'] = blob.crc32c		
+		row['file_crc32c'] = blob.crc32c
+		row['gs_crc32c'] = blob.crc32c		
 		if (blob.md5_hash):
 			row['md5sum'] = base64.b64decode(blob.md5_hash).hex()
+		row['file_size'] = blob.size
+		add_gs_manifest_metadata(row, blob, row['input_file_path'], row['input_file_path'])
 		od[blob.name] = row
 	return od
+
+def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path):
+		fields['gs_path'] = gs_path
+		fields['gs_modified_date'] = format(blob.updated)
+		fields['gs_file_size'] = blob.size
+		if (len(fields['md5sum']) == 0):
+			if (blob.md5_hash):
+				fields['md5sum'] =  base64.b64decode(blob.md5_hash).hex()
+			else:
+				md5sum = calculate_md5sum(input_file_path)
+				fields['md5sum'] = md5sum
+		if (not fields['ga4gh_drs_uri'].startswith("drs://")):
+			add_drs_uri_from_path(fields, gs_path)
 
 def generate_dict_from_s3_bucket(s3_bucket, study_id, consent_group):
 	od = OrderedDict()
@@ -124,6 +141,7 @@ def add_aws_manifest_metadata(fields, response, path):
 
 def get_empty_file_metadata():
 	row = {}
+	row['input_file_path'] = ''
 	row['study_id'] = ''
 	row['consent_group'] = '' 	
 	row['file_type'] = '' 	
@@ -252,7 +270,7 @@ def add_aws_manifest_metadata(fields, response, path):
 	fields['s3_path'] = path
 	fields['s3_modified_date'] = format(response['LastModified'])
 	fields['s3_file_size'] = file_size
-	print('updated:', fields)
+	print('updated aws fields:', fields)
 	
 def assign_guids(od):
 	for key, row in od.items():
@@ -487,4 +505,65 @@ def download_aws_key(bucket_name, key, download_path_name):
 	s3 = sess.client("s3")
 #	s3 = boto3.client('s3')
 	s3.download_file(bucket_name, key, download_path_name)
-	print('downloaded s3://%s/%s to %s' % (bucket_name, key, download_path_name))				
+	print('downloaded s3://%s/%s to %s' % (bucket_name, key, download_path_name))
+	
+def generate_ordered_dict_for_updated_files(od):
+	updated_od = OrderedDict()
+	for key, row in od.items():
+		if (row['input_file_path'].startswith("*M*")):
+			row['input_file_path'] = row['input_file_path'].strip("*M*")
+			row['md5sum'] = ""
+			row['gs_crc32c'] = ""
+			updated_od[key] = row
+			print("UPDATED", updated_od)
+
+	return updated_od		
+
+def get_gcloud_checksums_and_metadata_for_dict(od, threads, bucket_name):
+	storage_client = storage.Client()
+	bucket = storage_client.bucket(bucket_name)
+
+	with concurrent.futures.ThreadPoolExecutor(threads) as executor:
+		futures = [executor.submit(get_gcloud_checksums_and_metadata, value, bucket) for key, value in od.items()]
+		print("Executing total", len(futures), "jobs with", threads, "threads")
+		for idx, future in enumerate(concurrent.futures.as_completed(futures)):
+			try:
+				res = future.result()
+#				print("Processed job", idx, "result", res)	
+			except ValueError as e:
+				print(e)
+
+def get_gcloud_checksums_and_metadata(value, bucket):
+	strip_prefix = "gs://" + bucket.name
+#	strip_prefix = ''
+	path = value['gs_path'].lstrip(strip_prefix)
+	print('path', path)	
+	blob = bucket.get_blob(path)
+	if ((blob is not None) and blob.exists()):
+		blob.reload()
+		value['gs_crc32c'] = blob.crc32c
+		add_gs_manifest_metadata(value, blob, path, value['input_file_path'])
+	else: 
+		print("Blob does not exist:", path)
+
+# Given the blob object from Google Cloud, adds data into the ordered dictionary that will
+# be output by the receipt manifest file
+
+def add_gs_manifest_metadata(fields, blob, gs_path, input_file_path):
+		fields['gs_path'] = gs_path
+		fields['gs_modified_date'] = format(blob.updated)
+		fields['gs_file_size'] = blob.size
+		if (len(fields['md5sum']) == 0):
+			if (blob.md5_hash):
+				fields['md5sum'] =  base64.b64decode(blob.md5_hash).hex()
+			else:
+				if (file_path.startswith('gs://') or file_path.startswith('s3://')):
+					md5sum = calculate_md5sum_for_cloud_path(input_file_path)
+					fields['md5sum'] = md5sum
+				else:
+					md5sum = calculate_md5sum(input_file_path)
+					fields['md5sum'] = md5sum	
+		if (not fields['ga4gh_drs_uri'].startswith("drs://")):
+# FIXME	
+#			add_drs_uri_from_path(fields, gs_path)
+			add_new_drs_uri(fields)
