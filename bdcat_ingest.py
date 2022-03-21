@@ -29,8 +29,8 @@ import logging
 import boto3
 import botocore
 
-def get_bucket_name(study_id, consent_group):
-	return study_id.replace(".", "-") + '--' + consent_group
+def get_bucket_name(row):
+	return 'nih-nhlbi-' + row['study_id'].replace(".", "-") + '-' + row['consent_group']
 
 def gcs_bucket_writeable(bucket_name):
 	storage_client = storage.Client()
@@ -175,6 +175,13 @@ def get_receipt_manifest_file_pointer_for_bucket(bucket_name):
 	manifest_filepath = bucket_name + '.manifest.' + timestr + '.tsv'
 	f = open(manifest_filepath, 'wt')
 	return f
+
+def get_manifest_file_pointer_for_directory(directory_name):
+	timestr = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+	manifest_filepath = directory_name + '.tsv'
+	f = open(manifest_filepath, 'wt')
+	return f
+
 
 def download_gcs_bucket_to_localdisk(gcs_bucket, gcs_user_project):
 	subprocess.check_call([
@@ -389,6 +396,7 @@ def generate_dict_from_file_directory(file_directory, study_id, consent_group, m
 			file_path = os.path.join(r, file)
 			row = get_file_metadata_for_file_path(file_path, study_id, consent_group)
 			od[row['file_name']] = row
+			row['input_file_path'] = row['file_name']
 			if (manifest_keys):
 				for manifest_key in manifest_keys:
 					if (manifest_key not in row):
