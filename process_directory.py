@@ -133,7 +133,7 @@ def upload_manifest_file(receipt_manifest_file, gs_upload, aws_upload):
 		aws_client = boto3.client('s3')
 		for key, value in aws_buckets.items():
 			print("Uploading ", receipt_manifest_file.name, " to s3://", key, sep='')
-			aws_client.upload_file(receipt_manifest_file.name, key, basename(receipt_manifest_file.name))
+			aws_client.upload_file(receipt_manifest_file.name, key, basename(receipt_manifest_file.name), ExtraArgs={'ACL':'bucket-owner-full-control'})
 	
 
 
@@ -363,10 +363,10 @@ def aws_bucket_writeable(bucket_name, iam, arn, aws_buckets, test_mode):
 		bucket_objects_arn = 'arn:aws:s3:::%s/*' % bucket_name
 
 		try:
-			s3 = boto3.resource('s3')
-			if (not(s3.Bucket(bucket_name) in s3.buckets.all())):
-				print('ERROR: s3 bucket does not exist -', bucket_name)
-				return False
+# 			s3 = boto3.resource('s3')			
+# 			if (not(s3.Bucket(bucket_name) in s3.buckets.all())):
+# 				print('ERROR: s3 bucket does not exist:', bucket_name)
+# 				return False
 				
 			# Run the policy simulation for the PUT
 			results = iam.simulate_principal_policy(
