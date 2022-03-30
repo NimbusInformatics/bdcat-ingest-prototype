@@ -42,22 +42,41 @@ Please be sure not to share any controlled data (PII - personally identifiable i
     pip install google-cloud-storage
     pip install --upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
     conda activate nimbus--data-ingest
-	
-1. Create large file called big_binary.MOV in current directory (should be > 8 MB)
 
-2. Run `aws configure` / set up google cloud credentials
-
-3. For testing, update study\_id fields in sample.tsv. Then create aws/gs s3 buckets with the name `<study_id>--<consent_code>`
+Run `aws configure` / set up google cloud credentials
 
 ## Running Code
 
 
-    python3 process.py --aws --tsv sample.multifile.tsv 
-    or
-    python3 process.py --gs --tsv sample.multifile.tsv 
-   
+First, you will want to create the working directory to be the same
+name as the bucket. In this case, we will use the example `nih-nhlbi-test`-c1. This
+directory, `nih-nhlbi-test-c1`, should have all the files you
+want uploaded, and organized in the way you want them uploaded in the
+bucket. There should not be any files in the directory that you do not
+want uploaded.
 
-The output manifest file will be located at sample.mulifile.<timestamp>manifest.tsv
+After the `nih-nhlbi-test-c1` directory is set up, then cd ../
+to navigate to the parent directory.
+
+Then from that parent directory, run the following command:
+
+`<path to>/bdcat-ingest-prototype/generate_manifest_from_file_directory.py
+--directory nih-nhlbi-test-c1 --study_id <study id>
+--consent_group <consent group>`
+
+This will generate a manifest input file
+(`nih-nhlbi-test-c1.tsv`). Review the file for correctness.
+The blank fields will be filled in the next step.
+
+From the same parent directory, run the next command:
+
+`<path to>/bdcat-ingest-prototype/process_directory.py --tsv
+nih-nhlbi-test-c1.tsv --gs --aws --directory
+nih-nhlbi-test-c1 --bucket nih-nhlbi-test-c1`
+
+This step may take many hours to run as it will be calculating
+checksums and then finally performing a sync to the google and aws
+buckets.
 
 ## Design Doc
 
