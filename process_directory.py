@@ -347,7 +347,7 @@ def verify_aws_upload(path, value, bucket, bucket_name):
 		print("Verifying", path)
 		aws_client = boto3.client('s3')
 		response = aws_client.head_object(Bucket=bucket_name, Key=objs[0].key)
-		add_aws_manifest_metadata(value, response, 's3://' + objs[0].key)	
+		add_aws_manifest_metadata(value, response, 's3://' + bucket_name + '/' + objs[0].key)	
 
 
 # Confirm AWS bucket writeable by the user
