@@ -33,13 +33,13 @@ def main():
 	args = parse_args()
 	print('Script running on', sys.platform, 'with', os.cpu_count(), 'cpus')
 
+	global out_file
+	out_file = get_receipt_manifest_file_pointer_for_bucket(args.bucket)	
 	# process file
 	od = OrderedDict()
 	od = generate_dict_from_s3_bucket(args.bucket, args.study_id, args.consent_group)
 	calculate_md5sum_for_cloud_paths_threaded(od, args.checksum_threads)
 	assign_guids(od)
-	global out_file
-	out_file = get_receipt_manifest_file_pointer_for_bucket(args.bucket)	
 	update_manifest_file(out_file, od)				
 	out_file.close()
 	upload_manifest_file_to_s3_bucket(out_file.name, args.bucket)

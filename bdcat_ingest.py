@@ -384,7 +384,6 @@ def generate_dict_from_input_manifest_file(input_manifest_file, manifest_keys):
 			for manifest_key in manifest_keys:
 				if (manifest_key not in row):
 					row[manifest_key] = ''
-
 	return od
 
 def generate_dict_from_file_directory(file_directory, study_id, consent_group, manifest_keys):
@@ -459,6 +458,7 @@ def calculate_md5sum_for_cloud_paths_threaded(od, num_threads):
 
 def calculate_md5sum_for_cloud_path(row):
 	if ('md5sum' in row and row['md5sum'] != ''):
+		print("md5sum exists for " + row['file_name'])
 		return
 
 	local_file = row['file_name']
