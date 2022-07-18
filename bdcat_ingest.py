@@ -169,6 +169,11 @@ def get_file_metadata_for_file_path(file_path, study_id, consent_group):
 	row['file_size'] = os.stat(file_path).st_size
 	row['file_type'] = os.path.splitext(file_path)[1][1:]	
 	return row
+
+def get_starter_manifest_file_pointer_for_bucket(bucket_name):
+	manifest_filepath = bucket_name + '.manifest.tsv'
+	f = open(manifest_filepath, 'wt')
+	return f
 	
 def get_receipt_manifest_file_pointer_for_bucket(bucket_name):
 	timestr = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
