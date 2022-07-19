@@ -411,13 +411,16 @@ def generate_dict_from_file_directory(file_directory, study_id, consent_group, m
 	return od
 
 def update_md5s_from_file(od, md5_file):
-	reader = csv.DictReader(md5_file, dialect='excel-tab')
+	fieldnames = ['s3_path', 'md5sum', 'local_path']
+	reader = csv.DictReader(md5_file, dialect='excel-tab', fieldnames=fieldnames)
 	for row in reader:
-		file_name = row['file_name']
+		s3_path = row['s3_path']
 		md5sum = row['md5sum']
-		matching_row = od[row['file_name']]
+		matching_row = od[row['s3_path']]
 		if (matching_row):
-			matching_row['md5sum'] = md5sum	
+			matching_row['md5sum'] = md5sum
+		else:
+			print("Warning: Did not find path in TSV file: " + s3_path)	
 	return
 
 def update_manifest_file(f, od):
