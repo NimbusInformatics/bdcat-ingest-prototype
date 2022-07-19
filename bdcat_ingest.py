@@ -383,7 +383,7 @@ def generate_dict_from_input_manifest_file(input_manifest_file, manifest_keys):
 		
 	reader = csv.DictReader(input_manifest_file, dialect='excel-tab')
 	for row in reader:
-		print(row)
+#		print(row)
 		od[row['file_name']] = row
 		if (manifest_keys):
 			for manifest_key in manifest_keys:
@@ -409,6 +409,16 @@ def generate_dict_from_file_directory(file_directory, study_id, consent_group, m
 	# sort by file name
 	od = OrderedDict(sorted(od.items(), key=lambda x: x[1]['file_name']))
 	return od
+
+def update_md5s_from_file(od, md5_file):
+	reader = csv.DictReader(md5_file, dialect='excel-tab')
+	for row in reader:
+		file_name = row['file_name']
+		md5sum = row['md5sum']
+		matching_row = od[row['file_name']]
+		if (matching_row):
+			matching_row['md5sum'] = md5sum	
+	return
 
 def update_manifest_file(f, od):
 	with threading.Lock():
