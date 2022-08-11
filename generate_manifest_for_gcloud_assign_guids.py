@@ -17,7 +17,7 @@
 # --test                test mode: confirm input manifest file is valid
 # --threads THREADS     number of concurrent threads (default: number of CPUs on machine)
 
-
+import base64
 import argparse
 import subprocess
 import datetime
