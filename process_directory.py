@@ -735,20 +735,20 @@ def get_bucket_name():
 
 def get_drs_uri():
 	x = uuid.uuid4()
-	return "drs://dg.4503:dg.4503%2F" + str(x)
+	return "drs://dg.4503:dg.4503/" + str(x)
 
 def add_drs_uri_from_path(value, path):
 	if (not value['ga4gh_drs_uri'].startswith('drs://')):
 		segments = path.split('/')
 #		print("path:", path, "segments:", segments)
 		value['guid'] = 'dg.4503/' + segments[4]
-		value['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503%2F" + segments[4]
+		value['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503/" + segments[4]
 
 def add_new_drs_uri(value):
 	if (not value['ga4gh_drs_uri'].startswith('drs://')):
 		x = uuid.uuid4()		
 		value['guid'] = 'dg.4503/' + str(x)
-		value['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503%2F" + str(x)
+		value['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503/" + str(x)
 	
 # This method gets called after each checksum and upload so that as much state as possible
 # is written out to the receipt manifest file.

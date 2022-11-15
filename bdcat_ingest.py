@@ -292,7 +292,7 @@ def add_new_drs_uri(row):
 	if ('ga4gh_drs_uri' not in row or not row['ga4gh_drs_uri'].startswith('drs://')):
 		x = uuid.uuid4()		
 		row['guid'] = 'dg.4503/' + str(x)
-		row['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503%2F" + str(x)
+		row['ga4gh_drs_uri'] = "drs://dg.4503:dg.4503/" + str(x)
 
 def calculate_crc32c_threaded(od, num_threads):
 	print('Calculating crc32c checksums with', num_threads, 'threads')
