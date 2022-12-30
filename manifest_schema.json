@@ -1,0 +1,123 @@
+{
+  "$schema": "https://specs.frictionlessdata.io/schemas/table-schema.json",
+  "name": "Data Manifest File Format",
+  "title": "NHLBI BioData Catalyst Data Manifest File Format",
+  "description": "Specification for file format used for TSV data input manifest file used for ingestion by NHLBI BioData Catalyst",
+  "countryCode": "US",
+  "created": "2022-11-01",
+  "lastModified": "2022-12-29",
+  "version": "1.0.0",
+  "contributors": [
+    {
+      "title": "Ann Van",
+      "email": "ann@nimbusinformatics.com",
+      "organization": "Nimbus Informatics",
+      "role": "author"
+    }
+  ],
+  "fields": [
+    {
+      "name": "input_file_path",
+      "title": "Input File Path",
+      "type": "string",
+      "format": "uri",
+      "description": "Full path to data file"
+    },
+    {
+      "name": "file_name",
+      "title": "File Name",
+      "type": "string",
+      "description": "Relative File Name"
+    },
+    {
+      "name": "s3_file_size",
+      "title": "S3 File Size",
+      "type": "integer",
+      "description": "File Size as reported by AWS S3"      
+    },
+    {
+      "name": "s3_md5sum",
+      "title": "S3 MD5 Checksum",
+      "type": "string",
+      "description": "MD5 Checksum as reported by AWS S3"      
+    },
+    {
+      "name": "md5sum",
+      "title": "MD5 Checksum",
+      "type": "string",
+      "description": "MD5 Checksum",      
+      "constraints": {
+      	"required": true,
+      	"minLength": 32,
+      	"maxLength": 32
+  	  }
+    },
+    {
+      "name": "s3_path",
+      "title": "S3 File Path",
+      "type": "string",
+      "format": "uri",
+      "description": "Path to file on AWS S3",      
+      "constraints": {
+      	"unique": true,
+      	"required": true
+  	  }
+    },
+    {
+      "name": "s3_modified_date",
+      "title": "S3 Modified Datetime",
+      "type": "datetime",
+      "description": "Modified Datetime as reported by AWS S3"      
+    },
+    {
+      "name": "guid",
+      "title": "Globally Unique Identifier",
+      "type": "string", 
+      "description": "Globally Unique Identifier for File",      
+      "constraints": {
+      	"unique": true,
+      	"required": true
+  	  }
+    },
+    {
+      "name": "ga4gh_drs_uri",
+      "title": "GA4GH DRS URI",
+      "type": "string",
+      "format": "uri",
+      "description": "GA4GH Data Repository Service (DRS) URI",        
+      "constraints": {
+      	"unique": true,
+      	"required": true
+  	  }
+    },
+    {
+      "name": "gs_crc32c",
+      "title": "Google Storage CRC32C Checksum",
+      "description": "Google Storage CRC32C Checksum",       
+      "type": "string"
+    },
+    {
+      "name": "gs_path",
+      "title": "Google Storage Path",
+      "type": "string",
+      "format": "uri",
+      "description": "Path to file on Google Storage",   
+      "constraints": {
+      	"unique": true,      
+      	"required": true
+  	  }
+    },
+    {
+      "name": "gs_modified_date",
+      "title": "Google Storage Modified Datetime",
+      "type": "datetime",
+      "description": "Modified Datetime as reported by Google Storage"         
+    },
+    {
+      "name": "gs_file_size",
+      "title": "Google Storage File Size",      
+      "type": "integer",
+      "description": "File Size as reported on Google Storage"   
+    }
+  ]
+}

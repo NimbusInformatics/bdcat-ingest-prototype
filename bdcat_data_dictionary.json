@@ -1,0 +1,90 @@
+{
+  "$schema": "https://specs.frictionlessdata.io/schemas/table-schema.json",
+  "name": "Data Dictionary File Format",
+  "title": "NHLBI BioData Catalyst Data Dictionary File Format",
+  "description": "Specification for file format used for data dictionary files used for ingestion by NHLBI BioData Catalyst",
+  "countryCode": "US",
+  "created": "2022-11-01",
+  "lastModified": "2022-12-23",
+  "version": "1.0.0",
+  "contributors": [
+    {
+      "title": "Ann Van",
+      "email": "ann@nimbusinformatics.com",
+      "organization": "Nimbus Informatics",
+      "role": "author"
+    }
+  ],
+  "fields": [
+    {
+      "name": "VARNAME",
+      "type": "string"
+    },
+    {
+      "name": "VARDESC",
+      "type": "string"
+    },
+    {
+      "name": "DOCFILE",
+      "type": "string"
+    },
+    {
+      "name": "TYPE",
+      "type": "string"
+   },
+    {
+      "name": "UNITS",
+      "type": "string"
+
+    },
+    {
+      "name": "MIN",
+      "type": "string"
+    },
+    {
+      "name": "MAX",
+      "type": "string"
+    },
+    {
+      "name": "RESOLUTION",
+      "type": "string"
+    },
+    {
+      "name": "COMMENT1",
+      "type": "string"
+
+    },
+    {
+      "name": "COMMENT2",
+      "type": "string"
+    },
+    {
+      "name": "VARIABLE_SOURCE",
+      "type": "string"
+    },
+    {
+      "name": "SOURCE_VARIABLE_ID",
+      "type": "string"
+    },
+    {
+      "name": "VARIABLE_MAPPING",
+      "type": "string"
+    },
+    {
+      "name": "UNIQUEKEY",
+      "type": "string"
+    },
+    {
+      "name": "COLLINTERVAL",
+      "type": "string"
+    },
+    {
+      "name": "ORDER",
+      "type": "string"
+    },
+    {
+      "name": "VALUES",
+      "type": "string"
+    }
+  ]
+}
